@@ -1,0 +1,13 @@
+# Infracost configuration — declares the Terraform projects whose monthly
+# cost impact is estimated on every pull request. See .github/workflows/infracost.yml.
+version: 0.1
+
+projects:
+  # Primary infrastructure root (dev / staging / production share these modules).
+  - path: devops
+    name: devops-root
+  # Observability stack modules.
+  - path: infrastructure/terraform/apm
+    name: apm
+  - path: infrastructure/terraform/elk
+    name: elk
