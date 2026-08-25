@@ -6,12 +6,14 @@ import { runKycExpiryReminderJob } from "./kycExpiryReminder.js";
 import { runEscrowReconciliation } from "./escrowReconciliation.js";
 import { runApplicationSlaMonitorJob } from "./applicationSlaMonitor.js";
 import { runSessionTokenPurgeJob } from "./sessionTokenPurge.js";
+import { runAdminPortfolioDigestJob } from "./adminPortfolioDigest.js";
 
 let schedulerTask: ReturnType<typeof cron.schedule> | null = null;
 let kycExpiryTask: ReturnType<typeof cron.schedule> | null = null;
 let escrowReconciliationTask: ReturnType<typeof cron.schedule> | null = null;
 let applicationSlaTask: ReturnType<typeof cron.schedule> | null = null;
 let sessionTokenPurgeTask: ReturnType<typeof cron.schedule> | null = null;
+let adminDigestTask: ReturnType<typeof cron.schedule> | null = null;
 
 export function startScheduler() {
   if (schedulerTask) {
@@ -55,8 +57,17 @@ export function startScheduler() {
     await runApplicationSlaMonitorJob();
   }, { timezone: "UTC" });
 
+  // Weekly (Mon 08:00 UTC) by default: admin portfolio summary digest.
+  // Set ADMIN_PORTFOLIO_DIGEST_CRON_SCHEDULE to "0 8 * * *" for a daily cadence.
+  const digestSchedule =
+    process.env.ADMIN_PORTFOLIO_DIGEST_CRON_SCHEDULE || "0 8 * * 1";
+  adminDigestTask = cron.schedule(digestSchedule, async () => {
+    console.log("[Scheduler] Triggering admin portfolio digest job...");
+    await runAdminPortfolioDigestJob();
+  }, { timezone: "UTC" });
+
   console.log(
-    "[Scheduler] Started: repayment audit, session token purge, KYC expiry reminder, escrow reconciliation, and application SLA monitor jobs scheduled."
+    "[Scheduler] Started: repayment audit, session token purge, KYC expiry reminder, escrow reconciliation, application SLA monitor, and admin portfolio digest jobs scheduled."
   );
 }
 
@@ -80,6 +91,10 @@ export function stopScheduler() {
   if (applicationSlaTask) {
     applicationSlaTask.stop();
     applicationSlaTask = null;
+  }
+  if (adminDigestTask) {
+    adminDigestTask.stop();
+    adminDigestTask = null;
   }
   console.log("[Scheduler] Stopped.");
 }
