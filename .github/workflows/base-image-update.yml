@@ -11,3 +11,34 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Check and update base image digests
+        id: check_updates
+        run: |
+          UPDATED=0
+          for df in $(find . -name Dockerfile); do
+            # Extract image name and tag, ignoring AS alias
+            BASE_IMAGE=$(grep -m 1 -E "^FROM " $df | awk '{print $2}' | cut -d'@' -f1)
+            if [ -n "$BASE_IMAGE" ]; then
+              docker pull "$BASE_IMAGE"
+              NEW_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$BASE_IMAGE" | grep -o '@sha256:.*' || true)
+              # fallback if RepoDigests doesn't contain @sha256 directly but format does
+              if [ -z "$NEW_DIGEST" ]; then
+                NEW_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$BASE_IMAGE" | awk -F'@' '{print "@"$2}')
+              fi
+              
+              if [ -n "$NEW_DIGEST" ] && [ "$NEW_DIGEST" != "@" ]; then
+                NEW_FROM="FROM ${BASE_IMAGE}${NEW_DIGEST}"
+                OLD_FROM=$(grep -m 1 -E "^FROM " $df | awk '{print $1 " " $2}')
+                # keep AS alias if present
+                ALIAS=$(grep -m 1 -E "^FROM " $df | awk '{if ($3 == "AS" || $3 == "as") print " AS " $4}')
+                
+                if [ "$OLD_FROM" != "$NEW_FROM" ]; then
+                  sed -i "s|^FROM .*|${NEW_FROM}${ALIAS}|" $df
+                  UPDATED=1
+                  echo "Updated $df with new digest $NEW_DIGEST"
+                fi
+              fi
+            fi
+          done
+          echo "updated=$UPDATED" >> $GITHUB_OUTPUT
