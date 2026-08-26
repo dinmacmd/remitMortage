@@ -355,6 +355,10 @@ export type NotificationPreferenceData = {
   paymentMissed?: boolean;
   loanMilestones?: boolean;
   webhookUrl?: string;
+  timezone?: string;
+  businessDays?: string;
+  startHour?: string;
+  endHour?: string;
 };
 
 export async function getNotificationPreference(stellarAddressOrId: string) {

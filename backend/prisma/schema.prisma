@@ -161,6 +161,7 @@ model Applicant {
   loanApplications    LoanApplication[]
   borrowerCredentials BorrowerCredential[]
   kycDocuments        KycDocument[]
+  notificationPreference NotificationPreference?
 }
 
 model VerificationResult {
@@ -460,4 +461,30 @@ model ApiKey {
 
   @@index([key])
   @@index([revoked])
+}
+
+model NotificationPreference {
+  id                String   @id @default(uuid())
+  applicantId       String   @unique
+  applicant         Applicant @relation(fields: [applicantId], references: [id])
+  email             String?
+  phone             String?
+  emailAlerts       Boolean  @default(true)
+  smsAlerts         Boolean  @default(false)
+  escrowApproaching Boolean  @default(true)
+  escrowReached     Boolean  @default(true)
+  paymentMissed     Boolean  @default(true)
+  loanMilestones    Boolean  @default(true)
+  webhookUrl        String?
+
+  // Business hours throttling fields
+  timezone          String   @default("UTC")
+  businessDays      String   @default("1,2,3,4,5") // Monday-Friday
+  startHour         String   @default("09:00")
+  endHour           String   @default("17:00")
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([applicantId])
 }

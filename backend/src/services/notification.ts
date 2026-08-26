@@ -10,20 +10,99 @@ const MAX_ATTEMPTS = 5;
 const BASE_BACKOFF_MS = 60 * 1000; // 1 minute base backoff
 
 /**
+ * Computes milliseconds until the next business hour start time.
+ */
+function computeBusinessHoursDelay(preferences: any, isUrgent: boolean): number {
+  if (isUrgent || !preferences || !preferences.timezone) return 0;
+  
+  const tz = preferences.timezone || "UTC";
+  const startHourStr = preferences.startHour || "09:00";
+  const endHourStr = preferences.endHour || "17:00";
+  const businessDaysStr = preferences.businessDays || "1,2,3,4,5";
+  const businessDays = businessDaysStr.split(',').map(Number);
+  
+  const now = new Date();
+  
+  try {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      hour12: false,
+      hour: 'numeric',
+      minute: 'numeric',
+      second: 'numeric',
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric'
+    });
+    
+    const parts = formatter.formatToParts(now);
+    const getPart = (type: string) => parts.find(p => p.type === type)?.value || "";
+    
+    const currentHour = parseInt(getPart("hour"));
+    const currentMin = parseInt(getPart("minute"));
+    const startH = parseInt(startHourStr.split(':')[0]);
+    const startM = parseInt(startHourStr.split(':')[1] || "0");
+    const endH = parseInt(endHourStr.split(':')[0]);
+    const endM = parseInt(endHourStr.split(':')[1] || "0");
+    
+    const localDate = new Date(Date.UTC(
+      parseInt(getPart("year")),
+      parseInt(getPart("month")) - 1,
+      parseInt(getPart("day")),
+      currentHour,
+      currentMin,
+      parseInt(getPart("second"))
+    ));
+    const currentDay = localDate.getUTCDay(); // 0-6
+    
+    const currentMinutes = currentHour * 60 + currentMin;
+    const startMinutes = startH * 60 + startM;
+    const endMinutes = endH * 60 + endM;
+    
+    const isBusinessDay = businessDays.includes(currentDay);
+    const isBusinessHours = currentMinutes >= startMinutes && currentMinutes < endMinutes;
+    
+    if (isBusinessDay && isBusinessHours) {
+      return 0;
+    }
+    
+    let daysToAdd = 0;
+    if (!isBusinessDay || currentMinutes >= endMinutes) {
+      daysToAdd = 1;
+      while (!businessDays.includes((currentDay + daysToAdd) % 7)) {
+        daysToAdd++;
+      }
+    }
+    
+    const targetTime = new Date(localDate);
+    targetTime.setUTCDate(localDate.getUTCDate() + daysToAdd);
+    targetTime.setUTCHours(startH, startM, 0, 0);
+    
+    const diffMs = targetTime.getTime() - localDate.getTime();
+    return diffMs > 0 ? diffMs : 0;
+  } catch (e) {
+    logger.warn(`Failed to compute business hours for tz ${tz}`, e);
+    return 0;
+  }
+}
+
+/**
  * Queues a notification in the Postgres database and dispatches via BullMQ.
  */
 export async function queueNotification(
   recipient: string,
   type: NotificationType,
-  content: string
+  content: string,
+  delayMs: number = 0
 ) {
   const notification = await prisma.notification.create({
     data: {
       recipient,
       type,
       content,
-      status: "Pending",
+      status: delayMs > 0 ? "Pending" : "Pending",
       attempts: 0,
+      nextRetryAt: delayMs > 0 ? new Date(Date.now() + delayMs) : null,
     },
   });
 
@@ -36,6 +115,7 @@ export async function queueNotification(
   }, {
     attempts: MAX_ATTEMPTS,
     backoff: { type: "exponential", delay: BASE_BACKOFF_MS },
+    delay: delayMs > 0 ? delayMs : undefined,
   });
 
   return notification;
@@ -225,6 +305,8 @@ export async function dispatchMaturityAlerts(
   let subject = "RemitMortgage Alert";
   let text = event.message || "";
 
+  let isUrgent = false;
+
   switch (event.type) {
     case "ESCROW_APPROACHING":
       shouldSend = Boolean(escrowApproaching);
@@ -238,6 +320,7 @@ export async function dispatchMaturityAlerts(
       break;
     case "PAYMENT_MISSED":
       shouldSend = Boolean(paymentMissed);
+      isUrgent = true;
       subject = "⚠️ Missed Payment Alert";
       text = text || "A payment on your RemitMortgage schedule was missed. Please review your account to stay on track and avoid late fees.";
       break;
@@ -253,19 +336,20 @@ export async function dispatchMaturityAlerts(
     return;
   }
 
+  const delayMs = computeBusinessHoursDelay(preferences, isUrgent);
   const dispatches: Promise<any>[] = [];
 
   if (emailAlerts && email) {
-    dispatches.push(queueNotification(email, "EMAIL", `${subject}: ${text}`));
+    dispatches.push(queueNotification(email, "EMAIL", `${subject}: ${text}`, delayMs));
   }
 
   if (smsAlerts && phone) {
-    dispatches.push(queueNotification(phone, "SMS", `${subject}: ${text}`));
+    dispatches.push(queueNotification(phone, "SMS", `${subject}: ${text}`, delayMs));
   }
 
   if (webhookUrl) {
     const payload = JSON.stringify({ event: event.type, subject, message: text, address: applicantAddress });
-    dispatches.push(queueNotification(webhookUrl, "WEBHOOK", payload));
+    dispatches.push(queueNotification(webhookUrl, "WEBHOOK", payload, delayMs));
   }
 
   await Promise.allSettled(dispatches);
