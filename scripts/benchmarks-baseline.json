@@ -1,0 +1,5 @@
+{
+  "deposit_cpu": 1200000,
+  "disburse_cpu": 2500000,
+  "withdraw_cpu": 1800000
+}
