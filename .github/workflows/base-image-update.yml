@@ -42,3 +42,31 @@ jobs:
             fi
           done
           echo "updated=$UPDATED" >> $GITHUB_OUTPUT
+
+      - name: Build and Scan Images
+        if: steps.check_updates.outputs.updated == '1'
+        run: |
+          docker build -t remitmortgage-frontend:scan ./frontend
+          docker build -t remitmortgage-backend:scan ./backend
+          
+      - name: Run Trivy vulnerability scanner on Frontend
+        if: steps.check_updates.outputs.updated == '1'
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'remitmortgage-frontend:scan'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Run Trivy vulnerability scanner on Backend
+        if: steps.check_updates.outputs.updated == '1'
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'remitmortgage-backend:scan'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
