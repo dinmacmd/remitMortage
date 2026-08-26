@@ -46,6 +46,7 @@ import {
 } from "@dnd-kit/sortable";
 import { useWidgetStore, type WidgetId } from "../stores/useWidgetStore";
 import { SortableWidget } from "../../components/dashboard/SortableWidget";
+import { WidgetSettingsModal } from '../../components/dashboard/WidgetSettingsModal';
 
 const Navbar = loadDynamic(() => import("../../components/Navbar"), { ssr: false });
 
@@ -129,6 +130,7 @@ export default function DashboardPage() {
   const [txSuccess, setTxSuccess] = useState<{ hash: string; type: string } | null>(null);
   const [showDeposit, setShowDeposit] = useState(false);
   const [showWithdraw, setShowWithdraw] = useState(false);
+  const [showWidgetSettings, setShowWidgetSettings] = useState(false);
   const [milestones, setMilestones] = useState<MilestoneNode[]>([]);
   const [recoveryPlan, setRecoveryPlan] = useState<ReturnType<typeof generateRecoveryPlan>>(
     {} as ReturnType<typeof generateRecoveryPlan>
@@ -409,6 +411,13 @@ export default function DashboardPage() {
           </div>
 
           <div className="flex items-center gap-3">
+            <button onClick={() => setShowWidgetSettings(true)} className="btn-outline-blue hidden sm:flex items-center">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="mr-1.5">
+                <circle cx="12" cy="12" r="3"></circle>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+              </svg>
+              Layout
+            </button>
             <button
               id="tour-onboarding-cta"
               onClick={() => router.push("/onboarding")}
@@ -532,6 +541,10 @@ export default function DashboardPage() {
           isOpen={showWithdraw}
           onClose={() => setShowWithdraw(false)}
           deposited={status?.escrow.deposited || "0"}
+        />
+        <WidgetSettingsModal
+          isOpen={showWidgetSettings}
+          onClose={() => setShowWidgetSettings(false)}
         />
       </main>
     </div>

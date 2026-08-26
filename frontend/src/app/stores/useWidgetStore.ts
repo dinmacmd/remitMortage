@@ -1,7 +1,12 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-export type WidgetId = 'yield-summary' | 'loan-status' | 'notifications';
+export type WidgetId =
+  | 'quick-metrics'
+  | 'yield-estimator'
+  | 'credit-recovery'
+  | 'savings-loan'
+  | 'milestones';
 
 export interface WidgetState {
   order: WidgetId[];
@@ -11,11 +16,19 @@ export interface WidgetState {
   resetLayout: () => void;
 }
 
-const defaultOrder: WidgetId[] = ['yield-summary', 'loan-status', 'notifications'];
+const defaultOrder: WidgetId[] = [
+  'quick-metrics',
+  'yield-estimator',
+  'credit-recovery',
+  'savings-loan',
+  'milestones',
+];
 const defaultVisibility: Record<WidgetId, boolean> = {
-  'yield-summary': true,
-  'loan-status': true,
-  'notifications': true,
+  'quick-metrics': true,
+  'yield-estimator': true,
+  'credit-recovery': true,
+  'savings-loan': true,
+  'milestones': true,
 };
 
 export const useWidgetStore = create<WidgetState>()(
