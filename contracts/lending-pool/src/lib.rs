@@ -6,6 +6,9 @@ mod types;
 #[cfg(test)]
 mod fuzz;
 
+#[cfg(test)]
+mod upgrade_migration_tests;
+
 pub use crate::errors::PoolError;
 pub use crate::types::{BatchDisburseItem, DataKey, HalvingInfo, InvestorRecord, LoanCollateralRecord, LoanRecord, LoanStatus, PendingUpgradeRecord, PoolConfig, PoolHealth, RepaymentSchedule, RestructureProposal, Tranche, TrancheInfo};
 use soroban_sdk::{contract, contractimpl, symbol_short, IntoVal, Symbol, token, Address, BytesN, Env, Vec};
