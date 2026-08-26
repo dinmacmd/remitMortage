@@ -72,9 +72,54 @@ jobs:
         run: cargo audit
         working-directory: contracts
 
-  # ── Container Security Scans with Trivy ─────────────────────────────────
-  # Scans Docker images for vulnerabilities before deployment.
-  # Blocks builds if High/Critical vulnerabilities are detected.
+  # ── Dependency License Compliance ──────────────────────────────────────
+  # Scans npm and Rust dependencies for license compliance on every PR,
+  # failing the build with a clear report when a dependency declares a
+  # license not in scripts/license-allowlist.json. The allowlist is
+  # data-only: add a license id to that file to allow it — no workflow or
+  # script changes needed.
+  license-compliance:
+    name: Dependency License Compliance
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      # ── npm licenses ──────────────────────────────────────────────────
+      - name: Install npm license-checker
+        run: npm install -g license-checker
+
+      - name: Install backend dependencies
+        run: npm ci
+        working-directory: backend
+
+      - name: Generate npm license report
+        run: license-checker --json --start . > /tmp/npm-licenses.json
+        working-directory: backend
+
+      - name: Check npm license compliance
+        run: node scripts/license-compliance.js npm /tmp/npm-licenses.json scripts/license-allowlist.json
+
+      # ── Rust licenses ─────────────────────────────────────────────────
+      - name: Install cargo-license
+        run: cargo install cargo-license --locked
+
+      - name: Generate Rust license report
+        run: cargo license --json > /tmp/cargo-licenses.json
+        working-directory: contracts
+
+      - name: Check Rust license compliance
+        run: node scripts/license-compliance.js cargo /tmp/cargo-licenses.json scripts/license-allowlist.json
+
+
   trivy-backend-scan:
     name: Trivy Container Scan - Backend
     runs-on: ubuntu-latest
