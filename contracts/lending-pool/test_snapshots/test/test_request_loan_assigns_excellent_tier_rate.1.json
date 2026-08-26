@@ -913,6 +913,17 @@
                             },
                             {
                               "key": {
+                                "symbol": "min_deposit_amount"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 0
+                                }
+                              }
+                            },
+                            {
+                              "key": {
                                 "symbol": "senior_rate_bps"
                               },
                               "val": {
@@ -1372,6 +1383,14 @@
                       },
                       "val": {
                         "u32": 1000
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "last_verified_ledger"
+                      },
+                      "val": {
+                        "u32": 0
                       }
                     },
                     {
