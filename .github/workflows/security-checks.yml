@@ -7,6 +7,21 @@ on:
     branches: [ main, development ]
 
 jobs:
+  npm-registry-pinning:
+    name: npm Registry Pinning
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Check npm Registry Pinning
+        run: node scripts/check-npm-registry-pinning.mjs
+
   # ── Rust Static Analysis ────────────────────────────────────────────────
   # Fails the check on any formatting drift or clippy warning so PRs can't
   # merge with un-formatted code or unaddressed lint/code-smell warnings.
