@@ -223,13 +223,19 @@ export default function WithdrawModal({ isOpen, onClose, deposited }: Props) {
   const walletBlocked = !isConnected || wrongNetwork;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="withdraw-modal-title"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+    >
       <div className="absolute inset-0" onClick={onClose} aria-hidden="true" />
       <div className="relative w-full max-w-md bg-[var(--bg-card)] border border-[var(--border-color)] shadow-2xl rounded-2xl overflow-hidden">
         <div className="flex items-center justify-between p-5 border-b border-[var(--border-color)]">
-          <h2 className="text-lg font-bold text-[var(--text-primary)]">Early Withdrawal</h2>
+          <h2 id="withdraw-modal-title" className="text-lg font-bold text-[var(--text-primary)]">Early Withdrawal</h2>
           <button
             onClick={onClose}
+            aria-label="Close withdrawal dialog"
             className="p-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-lg transition-colors"
           >
             <X className="w-5 h-5" />

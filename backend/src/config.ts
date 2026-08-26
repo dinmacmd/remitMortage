@@ -86,6 +86,8 @@ export interface Config {
   opsFallbackAlertEmail: string;
   /** Incoming Slack webhook URL for ops SLA alerts. */
   opsSlackWebhookUrl: string | null;
+  /** Number of days expired session/refresh tokens are retained before being purged. */
+  sessionTokenRetentionDays: number;
 }
 
 /** Parses APPLICATION_SLA_HOURS (a JSON map of status -> SLA hours). */
@@ -207,5 +209,11 @@ export function loadConfig(): Config {
       process.env.SLACK_WEBHOOK_URL ||
       process.env.ALERT_WEBHOOK_URL ||
       null,
+    sessionTokenRetentionDays: parseInt(
+      process.env.SESSION_TOKEN_RETENTION_DAYS ||
+      process.env.RETENTION_DAYS ||
+      "7",
+      10
+    ),
   };
 }

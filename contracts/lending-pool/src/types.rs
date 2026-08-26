@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, BytesN};
+use soroban_sdk::{contracttype, Address, BytesN, Symbol};
 
 /// Pending upgrade proposal (used when upgrade_delay_ledgers > 0).
 #[contracttype]
@@ -306,4 +306,20 @@ pub enum DataKey {
     BorrowerLifetimeInterest(Address),
     /// Tracks whether a loan's maturity rebate has been claimed.
     LoanRebateClaimed(BytesN<32>),
+    /// Collateral tracking for a loan (partial releases).
+    LoanCollateral(BytesN<32>),
+    /// Maps a loan Symbol to its canonical BytesN<32> loan ID.
+    LoanSymbolMap(Symbol),
+}
+
+/// Tracks collateral amounts, releases, and minimum collateralization ratio for a loan.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct LoanCollateralRecord {
+    /// Initial locked collateral amount.
+    pub initial_collateral: i128,
+    /// Total collateral amount released to borrower so far.
+    pub released_collateral: i128,
+    /// Minimum required collateralization ratio in basis points (e.g. 3000 = 30%).
+    pub min_collateral_ratio_bps: u32,
 }

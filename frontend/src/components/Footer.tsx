@@ -20,7 +20,7 @@ const operationsLinks = [
 export default function Footer() {
   const t = useTranslations("footer");
   return (
-    <footer className="rm-footer">
+    <footer role="contentinfo" className="rm-footer">
       <div className="rm-footer-inner">
         <div className="rm-footer-grid">
           <div className="rm-footer-brand">

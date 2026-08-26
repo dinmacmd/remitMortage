@@ -488,3 +488,18 @@ model NotificationPreference {
 
   @@index([applicantId])
 }
+
+model SessionToken {
+  id            String    @id @default(uuid())
+  tokenHash     String    @unique
+  walletAddress String
+  expiresAt     DateTime
+  revokedAt     DateTime?
+  lastUsedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([walletAddress])
+  @@index([expiresAt])
+  @@index([createdAt])
+}

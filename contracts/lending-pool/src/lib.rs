@@ -7,8 +7,9 @@ mod types;
 mod fuzz;
 
 pub use crate::errors::PoolError;
-pub use crate::types::{BatchDisburseItem, DataKey, HalvingInfo, InvestorRecord, LoanRecord, LoanStatus, PendingUpgradeRecord, PoolConfig, PoolHealth, RepaymentSchedule, RestructureProposal, Tranche, TrancheInfo};
+pub use crate::types::{BatchDisburseItem, DataKey, HalvingInfo, InvestorRecord, LoanCollateralRecord, LoanRecord, LoanStatus, PendingUpgradeRecord, PoolConfig, PoolHealth, RepaymentSchedule, RestructureProposal, Tranche, TrancheInfo};
 use soroban_sdk::{contract, contractimpl, symbol_short, IntoVal, Symbol, token, Address, BytesN, Env, Vec};
+use soroban_sdk::xdr::ToXdr;
 use insurance_pool::{premium_for, InsurancePoolContractClient};
 use multisig_validator::MultisigValidatorClient;
 use verification_registry::VerificationRegistryContractClient;
@@ -1952,6 +1953,171 @@ impl LendingPoolContract {
         );
 
         Ok(())
+    }
+
+    /// Register a human-readable Symbol mapping to a canonical BytesN<32> loan ID.
+    pub fn register_loan_symbol(
+        env: Env,
+        symbol: Symbol,
+        loan_id: BytesN<32>,
+    ) -> Result<(), PoolError> {
+        Self::check_not_paused(&env)?;
+        let config = Self::read_config(&env)?;
+        config.admin.require_auth();
+        env.storage()
+            .persistent()
+            .set(&DataKey::LoanSymbolMap(symbol), &loan_id);
+        Ok(())
+    }
+
+    /// Explicitly configure initial collateral amount and minimum collateralization ratio (bps) for a loan.
+    pub fn set_loan_collateral(
+        env: Env,
+        loan_id: BytesN<32>,
+        initial_collateral: i128,
+        min_ratio_bps: u32,
+    ) -> Result<(), PoolError> {
+        Self::check_not_paused(&env)?;
+        if initial_collateral <= 0 {
+            return Err(PoolError::InvalidAmount);
+        }
+        let config = Self::read_config(&env)?;
+        config.admin.require_auth();
+
+        let existing = Self::read_loan_collateral(&env, &loan_id);
+        let released = existing.map(|c| c.released_collateral).unwrap_or(0);
+
+        let record = LoanCollateralRecord {
+            initial_collateral,
+            released_collateral: released,
+            min_collateral_ratio_bps: min_ratio_bps,
+        };
+        env.storage()
+            .persistent()
+            .set(&DataKey::LoanCollateral(loan_id), &record);
+        Ok(())
+    }
+
+    /// Read the collateral record for a loan, or derive the default 30% ratio record if unset.
+    pub fn get_loan_collateral(env: Env, loan_id: BytesN<32>) -> Option<LoanCollateralRecord> {
+        Self::read_loan_collateral(&env, &loan_id)
+    }
+
+    fn read_loan_collateral(env: &Env, loan_id: &BytesN<32>) -> Option<LoanCollateralRecord> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::LoanCollateral(loan_id.clone()))
+    }
+
+    fn get_or_default_loan_collateral(env: &Env, loan_id: &BytesN<32>, loan: &LoanRecord) -> LoanCollateralRecord {
+        if let Some(record) = Self::read_loan_collateral(env, loan_id) {
+            record
+        } else {
+            // RemitMortgage 70/30 standard: collateral is 30/70 of loan principal
+            let initial_collateral = (loan.principal * 30) / 70;
+            LoanCollateralRecord {
+                initial_collateral,
+                released_collateral: 0,
+                min_collateral_ratio_bps: 3_000, // 30% default minimum collateral ratio
+            }
+        }
+    }
+
+    /// Calculate releasable collateral amount, remaining collateral, and current collateralization ratio in bps.
+    pub fn get_releasable_collateral(env: Env, loan_id: BytesN<32>) -> Result<(i128, i128, u32), PoolError> {
+        let loan = Self::read_loan(&env, &loan_id)?;
+        let collateral = Self::get_or_default_loan_collateral(&env, &loan_id, &loan);
+
+        let (releasable, remaining_collateral, current_ratio_bps) = Self::compute_collateral_release(&loan, &collateral);
+        Ok((releasable, remaining_collateral, current_ratio_bps))
+    }
+
+    fn compute_collateral_release(loan: &LoanRecord, collateral: &LoanCollateralRecord) -> (i128, i128, u32) {
+        if loan.principal <= 0 || collateral.initial_collateral <= 0 {
+            return (0, 0, 0);
+        }
+
+        // Cumulative principal paid down (capped at principal)
+        let principal_paid = loan.repaid.min(loan.principal);
+
+        // Earned proportional collateral release
+        let earned_release = (principal_paid * collateral.initial_collateral) / loan.principal;
+        let releasable = earned_release.saturating_sub(collateral.released_collateral);
+
+        let remaining_collateral = collateral.initial_collateral.saturating_sub(collateral.released_collateral + releasable);
+        let remaining_principal = loan.principal.saturating_sub(principal_paid);
+
+        let current_ratio_bps = if remaining_principal > 0 {
+            ((remaining_collateral * 10_000) / remaining_principal) as u32
+        } else {
+            10_000u32
+        };
+
+        (releasable, remaining_collateral, current_ratio_bps)
+    }
+
+    /// Release partial collateral for a loan using its Symbol identifier.
+    pub fn release_collateral(env: Env, loan_id: Symbol) -> Result<i128, PoolError> {
+        let canonical_id: BytesN<32> = if let Some(id) = env.storage().persistent().get(&DataKey::LoanSymbolMap(loan_id.clone())) {
+            id
+        } else {
+            // Derive canonical 32-byte hash from Symbol
+            env.crypto().sha256(&loan_id.to_xdr(&env)).into()
+        };
+        Self::do_release_collateral(&env, &canonical_id)
+    }
+
+    /// Release partial collateral for a loan using its BytesN<32> identifier.
+    pub fn release_collateral_by_id(env: Env, loan_id: BytesN<32>) -> Result<i128, PoolError> {
+        Self::do_release_collateral(&env, &loan_id)
+    }
+
+    fn do_release_collateral(env: &Env, loan_id: &BytesN<32>) -> Result<i128, PoolError> {
+        Self::check_not_paused(env)?;
+        let mut loan = Self::read_loan(env, loan_id)?;
+
+        if loan.status != LoanStatus::Approved && loan.status != LoanStatus::Repaid {
+            return Err(PoolError::InvalidLoanState);
+        }
+
+        loan.borrower.require_auth();
+
+        // Accrue interest to ensure loan state is up to date
+        Self::accrue_interest(env, &mut loan);
+
+        let mut collateral = Self::get_or_default_loan_collateral(env, loan_id, &loan);
+
+        let (releasable, remaining_collateral, ratio_bps) = Self::compute_collateral_release(&loan, &collateral);
+
+        if releasable <= 0 {
+            return Err(PoolError::NoCollateralToRelease);
+        }
+
+        let remaining_principal = loan.principal.saturating_sub(loan.repaid.min(loan.principal));
+        if remaining_principal > 0 && ratio_bps < collateral.min_collateral_ratio_bps {
+            return Err(PoolError::CollateralRatioBreached);
+        }
+
+        // Transfer released collateral tokens to the borrower
+        let config = Self::read_config(env)?;
+        let token = Self::token_client(env, &config.token);
+        token.transfer(
+            &env.current_contract_address(),
+            &loan.borrower,
+            &releasable,
+        );
+
+        collateral.released_collateral += releasable;
+        env.storage()
+            .persistent()
+            .set(&DataKey::LoanCollateral(loan_id.clone()), &collateral);
+
+        env.events().publish(
+            (Symbol::new(env, "collateral_released"), loan_id.clone()),
+            (loan.borrower.clone(), releasable, remaining_collateral),
+        );
+
+        Ok(releasable)
     }
 
 
@@ -7033,4 +7199,142 @@ mod test {
         );
     }
 
+    // ── Partial Collateral Release Tests ──────────────────────────────────
+
+    #[test]
+    fn test_sequential_partial_collateral_releases_scale_with_paydown() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (_admin, investor, _treasury, token_address, client) = setup_pool(&env);
+        let token = token::Client::new(&env, &token_address);
+        let borrower = Address::generate(&env);
+        let loan_id = mock_loan_id(&env);
+
+        // Initial investor deposit: 100k
+        client.deposit(&investor, &100_000_0000000i128, &Tranche::Senior);
+
+        // Request and approve a 70k loan with 30k collateral (70/30 standard)
+        let principal = 70_000_0000000i128;
+        let initial_collateral = 30_000_0000000i128;
+        client.request_loan(&borrower, &loan_id, &principal);
+        client.approve_loan(&loan_id);
+        let contractor = Address::generate(&env);
+        client.add_contractor(&contractor);
+        client.disburse(&loan_id, &contractor, &principal);
+        client.set_loan_collateral(&loan_id, &initial_collateral, &3_000u32); // 30% min ratio
+
+        // Before any repayment, releasable collateral is 0
+        let (releasable, remaining_c, ratio) = client.get_releasable_collateral(&loan_id);
+        assert_eq!(releasable, 0i128);
+        assert_eq!(remaining_c, initial_collateral);
+        assert_eq!(ratio, 4_285u32); // 30k / 70k ≈ 42.85%
+
+        // Attempting release with 0 repayment returns an error
+        let res = client.try_release_collateral_by_id(&loan_id);
+        assert!(res.is_err());
+
+        // Mint tokens to borrower for repayment
+        let sac = token::StellarAssetClient::new(&env, &token_address);
+        sac.mint(&borrower, &100_000_0000000i128);
+
+        // Repayment 1: Pay 35k principal (50% paydown)
+        client.repay(&borrower, &loan_id, &35_000_0000000i128);
+
+        // After 50% paydown, earned release is 50% of 30k = 15k
+        let (releasable_1, rem_1, ratio_1) = client.get_releasable_collateral(&loan_id);
+        assert_eq!(releasable_1, 15_000_0000000i128);
+        assert_eq!(rem_1, 15_000_0000000i128);
+        assert_eq!(ratio_1, 4_285u32); // 15k / 35k ≈ 42.85% (>= 30% min)
+
+        // Execute first partial release
+        let borrower_bal_before = token.balance(&borrower);
+        let released_1 = client.release_collateral_by_id(&loan_id);
+        assert_eq!(released_1, 15_000_0000000i128);
+        assert_eq!(token.balance(&borrower), borrower_bal_before + 15_000_0000000i128);
+
+        // Immediately calling again returns error (already claimed this tranche)
+        assert!(client.try_release_collateral_by_id(&loan_id).is_err());
+
+        // Repayment 2: Pay another 17.5k principal (25% paydown -> 75% cumulative)
+        client.repay(&borrower, &loan_id, &17_500_0000000i128);
+
+        // Releasable is 75% * 30k (22.5k) - 15k = 7.5k
+        let (releasable_2, rem_2, _ratio_2) = client.get_releasable_collateral(&loan_id);
+        assert_eq!(releasable_2, 7_500_0000000i128);
+        assert_eq!(rem_2, 7_500_0000000i128);
+
+        let released_2 = client.release_collateral_by_id(&loan_id);
+        assert_eq!(released_2, 7_500_0000000i128);
+
+        // Repayment 3: Pay remaining principal + interest to reach 100%
+        let loan_info = client.get_loan_info(&loan_id);
+        client.repay(&borrower, &loan_id, &loan_info.outstanding_debt);
+
+        // Final release unlocks all remaining collateral (7.5k)
+        let released_3 = client.release_collateral_by_id(&loan_id);
+        assert_eq!(released_3, 7_500_0000000i128);
+
+        // Total released across all 3 steps = 15k + 7.5k + 7.5k = 30k (100%)
+        let col_record = client.get_loan_collateral(&loan_id).unwrap();
+        assert_eq!(col_record.released_collateral, initial_collateral);
+    }
+
+    #[test]
+    fn test_partial_collateral_release_via_symbol_identifier() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (_admin, investor, _treasury, token_address, client) = setup_pool(&env);
+        let borrower = Address::generate(&env);
+        let loan_id = mock_loan_id(&env);
+        let loan_sym = Symbol::new(&env, "loan_milestone_1");
+        let principal = 50_000_0000000i128;
+
+        client.deposit(&investor, &100_000_0000000i128, &Tranche::Senior);
+        client.request_loan(&borrower, &loan_id, &principal);
+        client.approve_loan(&loan_id);
+        let contractor = Address::generate(&env);
+        client.add_contractor(&contractor);
+        client.disburse(&loan_id, &contractor, &principal);
+        client.register_loan_symbol(&loan_sym, &loan_id);
+
+        // Mint & Repay 25k (50%)
+        let sac = token::StellarAssetClient::new(&env, &token_address);
+        sac.mint(&borrower, &50_000_0000000i128);
+        client.repay(&borrower, &loan_id, &25_000_0000000i128);
+
+        // Release via symbol
+        let released = client.release_collateral(&loan_sym);
+        let expected_50pct = (50_000_0000000i128 * 30 / 70) / 2;
+        assert_eq!(released, expected_50pct);
+    }
+
+    #[test]
+    fn test_collateral_release_reverts_if_minimum_ratio_breached() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (_admin, investor, _treasury, token_address, client) = setup_pool(&env);
+        let borrower = Address::generate(&env);
+        let loan_id = mock_loan_id(&env);
+        let principal = 70_000_0000000i128;
+
+        client.deposit(&investor, &100_000_0000000i128, &Tranche::Senior);
+        client.request_loan(&borrower, &loan_id, &principal);
+        client.approve_loan(&loan_id);
+        let contractor = Address::generate(&env);
+        client.add_contractor(&contractor);
+        client.disburse(&loan_id, &contractor, &principal);
+        
+        // Set a strict 60% minimum collateral ratio (6000 bps)
+        client.set_loan_collateral(&loan_id, &30_000_0000000i128, &6_000u32);
+
+        let sac = token::StellarAssetClient::new(&env, &token_address);
+        sac.mint(&borrower, &50_000_0000000i128);
+        // Repay 20k (remaining principal 50k).
+        // Collateral remaining after release would be 30k - (20/70 * 30) = ~21.4k
+        // 21.4k / 50k = 42.8% which is below the strict 60% min ratio -> should revert
+        client.repay(&borrower, &loan_id, &20_000_0000000i128);
+
+        let res = client.try_release_collateral_by_id(&loan_id);
+        assert!(res.is_err());
+    }
 }

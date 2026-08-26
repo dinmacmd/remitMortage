@@ -33,6 +33,7 @@ import { workspaceRouter } from "./routes/workspace.js";
 import { metricsRouter } from "./routes/metrics.js";
 import { getTrackedConnectionLimit } from "./services/dbPoolMetrics.js";
 import { webhooksRouter } from "./routes/webhooks.js";
+import { incidentWebhookRouter } from "./routes/incidentWebhooks.js";
 import { apiKeysRouter } from "./routes/apiKeys.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { requestLogger } from "./middleware/requestLogger.js";
@@ -190,6 +191,7 @@ app.use("/api/kyc", kycRouter);
 app.use("/api/notifications", notificationsRouter);
 app.use("/api/admin", authMiddleware, adminRouter);
 app.use("/api/admin/api-keys", apiKeysRouter);
+app.use("/api/webhooks/pagerduty", incidentWebhookRouter);
 app.use("/api/webhooks", authMiddleware, webhooksRouter);
 app.use("/api/user", userRouter);
 // Swagger UI — excluded from rate limits so developers can inspect freely

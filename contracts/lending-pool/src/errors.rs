@@ -85,4 +85,12 @@ pub enum PoolError {
     LockupPeriodActive = 36,
     /// Deposit is below the pool's configured minimum deposit amount.
     DepositBelowMinimum = 40,
+    /// Collateral release would breach the minimum collateralization ratio.
+    CollateralRatioBreached = 41,
+    /// No collateral available for release.
+    NoCollateralToRelease = 42,
+    /// Collateral has already been seized.
+    CollateralAlreadySeized = 43,
+    /// Invalid collateral ratio configuration.
+    InvalidCollateralRatio = 44,
 }

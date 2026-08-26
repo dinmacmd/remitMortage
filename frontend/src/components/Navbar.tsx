@@ -59,7 +59,7 @@ function InnerNavbar() {
 
   return (
     <>
-      <header className="rm-navbar fixed top-0 start-0 end-0 z-50 bg-[#060913]/85 backdrop-blur-xl border-b border-slate-800/80 shadow-lg shadow-black/40">
+      <header role="banner" className="rm-navbar fixed top-0 start-0 end-0 z-50 bg-[#060913]/85 backdrop-blur-xl border-b border-slate-800/80 shadow-lg shadow-black/40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 sm:h-20 flex items-center justify-between gap-3">
           {/* Logo */}
           <Link href="/" className="flex items-center gap-2.5 hover:opacity-90 transition-all group shrink-0">
@@ -72,7 +72,7 @@ function InnerNavbar() {
           </Link>
 
           {/* Desktop Nav Links */}
-          <nav className="hidden xl:flex items-center gap-1 text-sm" aria-label="Primary navigation">
+          <nav role="navigation" className="hidden xl:flex items-center gap-1 text-sm" aria-label="Primary navigation">
             {PRIMARY_LINKS.map(({ href, labelKey }) => {
               const active = pathname === href || pathname.startsWith(`${href}/`);
               return (
@@ -207,7 +207,7 @@ function InnerNavbar() {
         </div>
 
         {/* Nav links */}
-        <nav className="flex-1 overflow-y-auto py-4 px-4">
+        <nav role="navigation" aria-label="Mobile navigation" className="flex-1 overflow-y-auto py-4 px-4">
           {[
             { label: "Borrower", links: PRIMARY_LINKS },
             { label: "Financing", links: FINANCE_LINKS },

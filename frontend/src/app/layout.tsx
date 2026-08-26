@@ -12,6 +12,7 @@ import { KeyboardShortcutsProvider } from "@/context/KeyboardShortcutsContext";
 import { ToastContainer } from "@/components/ToastContainer";
 import { HotToaster } from "@/components/HotToaster";
 import WalletBanner from "@/components/WalletBanner";
+import SkipToContent from "@/components/SkipToContent";
 import Footer from "@/components/Footer";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getMessages } from "next-intl/server";
@@ -113,6 +114,7 @@ export default async function RootLayout({
         />
       </head>
       <body className="min-h-screen bg-[#060913] text-slate-100 font-sans antialiased flex flex-col justify-between">
+        <SkipToContent />
         <NextIntlClientProvider messages={messages} locale={locale}>
           <WalletBanner />
           <ThemeProvider>
@@ -123,7 +125,9 @@ export default async function RootLayout({
                 <ToastProvider>
                   <IdleSessionProvider>
                     <KeyboardShortcutsProvider>
-                      <div className="flex-1">{children}</div>
+                      <main id="main-content" role="main" tabIndex={-1} className="flex-1 focus:outline-none">
+                        {children}
+                      </main>
                       <Footer />
                       <NotificationLayer />
                       <ToastContainer />
