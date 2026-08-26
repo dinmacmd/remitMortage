@@ -68,7 +68,7 @@ export function NotificationDrawer() {
         aria-label="Notifications panel"
         aria-hidden={!isPanelOpen}
         data-testid="notification-center-drawer"
-        className={`fixed right-0 top-0 z-[960] h-full w-full max-w-[24rem] border-l border-slate-800 bg-[#0b1020]/95 shadow-2xl shadow-black/70 backdrop-blur-xl transition-transform duration-300 ease-out ${
+        className={`fixed end-0 top-0 z-[960] h-full w-full max-w-[24rem] border-s border-slate-800 bg-[#0b1020]/95 shadow-2xl shadow-black/70 backdrop-blur-xl transition-transform duration-300 ease-out ${
           isPanelOpen ? "translate-x-0" : "translate-x-full"
         }`}
       >
@@ -179,13 +179,13 @@ export function NotificationDrawer() {
                 >
                   {/* Unread indicator dot */}
                   {!item.read && (
-                    <span className="absolute top-3 right-3 h-2 w-2 rounded-full bg-cyan-400 animate-ping" />
+                    <span className="absolute top-3 end-3 h-2 w-2 rounded-full bg-cyan-400 animate-ping" />
                   )}
 
                   <div className="flex items-start gap-3">
                     <VariantIcon variant={item.variant} />
                     <div className="min-w-0 flex-1 space-y-1">
-                      <div className="flex items-center justify-between gap-2 pr-4">
+                      <div className="flex items-center justify-between gap-2 pe-4">
                         <p
                           className={`text-xs font-semibold ${
                             item.read ? "text-slate-300" : "text-white font-bold"

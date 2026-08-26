@@ -59,7 +59,7 @@ function InnerNavbar() {
 
   return (
     <>
-      <header className="rm-navbar fixed top-0 left-0 right-0 z-50 bg-[#060913]/85 backdrop-blur-xl border-b border-slate-800/80 shadow-lg shadow-black/40">
+      <header className="rm-navbar fixed top-0 start-0 end-0 z-50 bg-[#060913]/85 backdrop-blur-xl border-b border-slate-800/80 shadow-lg shadow-black/40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 sm:h-20 flex items-center justify-between gap-3">
           {/* Logo */}
           <Link href="/" className="flex items-center gap-2.5 hover:opacity-90 transition-all group shrink-0">
@@ -184,7 +184,7 @@ function InnerNavbar() {
         role="dialog"
         aria-modal="true"
         aria-label="Mobile navigation"
-        className={`rm-mobile-nav fixed top-0 right-0 z-50 h-full w-[85vw] max-w-sm bg-[#0b0f1d] border-l border-slate-800 flex flex-col xl:hidden transition-transform duration-300 ease-in-out shadow-2xl shadow-black/50 ${
+        className={`rm-mobile-nav fixed top-0 end-0 z-50 h-full w-[85vw] max-w-sm bg-[#0b0f1d] border-s border-slate-800 flex flex-col xl:hidden transition-transform duration-300 ease-in-out shadow-2xl shadow-black/50 ${
           menuOpen ? "translate-x-0" : "translate-x-full"
         }`}
       >
@@ -245,7 +245,7 @@ function InnerNavbar() {
       </div>
 
       {/* Notice banner stack under the navbar */}
-      <div className="fixed top-16 sm:top-20 left-0 right-0 z-40 flex flex-col">
+      <div className="fixed top-16 sm:top-20 start-0 end-0 z-40 flex flex-col">
         {wrongNetwork && (
           <div
             role="alert"
@@ -446,7 +446,7 @@ function NotificationButton({
         <path d="M9.73 21a2 2 0 0 0 3.54 0" />
       </svg>
       {unreadCount > 0 && (
-        <span className="absolute -right-0.5 -top-0.5 inline-flex min-w-[18px] items-center justify-center rounded-full bg-cyan-400 px-1 py-0.5 text-[9px] sm:text-[10px] font-bold leading-none text-slate-950 shadow-lg shadow-cyan-400/30">
+        <span className="absolute -end-0.5 -top-0.5 inline-flex min-w-[18px] items-center justify-center rounded-full bg-cyan-400 px-1 py-0.5 text-[9px] sm:text-[10px] font-bold leading-none text-slate-950 shadow-lg shadow-cyan-400/30">
           {unreadCount > 9 ? "9+" : unreadCount}
         </span>
       )}
