@@ -32,7 +32,7 @@ loanRouter.post("/apply", validatePositiveNumber("amount"), async (req, res) => 
     }
 
     // Block loan submissions when any KYC document is expired
-    const applicant = await prisma.applicant.findUnique({ where: { stellarAddress: borrowerAddress } });
+    const applicant = await prisma.applicant.findFirst({ where: { stellarAddress: borrowerAddress, deletedAt: null } });
     if (applicant && await hasExpiredKycDocuments(applicant.id)) {
       return res.status(403).json({
         error: "kyc_documents_expired",

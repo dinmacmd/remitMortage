@@ -63,8 +63,8 @@ didRouter.post("/verify", authMiddleware, async (req, res) => {
     const user = req.user as { walletAddress: string } | undefined;
     const walletAddress = user?.walletAddress ?? proof.signerAddress;
 
-    const applicant = await prisma.applicant.findUnique({
-      where: { stellarAddress: walletAddress },
+    const applicant = await prisma.applicant.findFirst({
+      where: { stellarAddress: walletAddress, deletedAt: null },
     });
 
     if (!applicant) {
@@ -152,8 +152,8 @@ didRouter.get("/credential/:did", authMiddleware, async (req, res) => {
 didRouter.get("/applicant/:address", authMiddleware, async (req, res) => {
   try {
     const { address } = req.params;
-    const applicant = await prisma.applicant.findUnique({
-      where: { stellarAddress: address },
+    const applicant = await prisma.applicant.findFirst({
+      where: { stellarAddress: address, deletedAt: null },
       include: { borrowerCredentials: true },
     });
 

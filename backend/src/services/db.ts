@@ -119,14 +119,14 @@ export async function saveIndexerState(key: string, lastProcessedLedger: number,
 }
 
 export async function getBorrower(stellarAddress: string) {
-  return prisma.borrower.findUnique({
-    where: { stellarAddress },
+  return prisma.borrower.findFirst({
+    where: { stellarAddress, deletedAt: null },
   });
 }
 
 export async function getBorrowerStatus(stellarAddress: string) {
-  return prisma.borrower.findUnique({
-    where: { stellarAddress },
+  return prisma.borrower.findFirst({
+    where: { stellarAddress, deletedAt: null },
     select: {
       stellarAddress: true,
       escrowBalance: true,
@@ -302,14 +302,14 @@ export async function upsertApplicant(
   const encrypted = encryptFields(data);
   return prisma.applicant.upsert({
     where: { stellarAddress },
-    update: { ...encrypted, updatedAt: new Date() },
+    update: { ...encrypted, deletedAt: null, updatedAt: new Date() },
     create: { stellarAddress, ...encrypted },
   });
 }
 
 export async function getApplicant(stellarAddress: string) {
-  const applicant = await prisma.applicant.findUnique({
-    where: { stellarAddress },
+  const applicant = await prisma.applicant.findFirst({
+    where: { stellarAddress, deletedAt: null },
     include: {
       verificationResults: { orderBy: { analyzedAt: "desc" }, take: 1 },
       loanApplications: { orderBy: { createdAt: "desc" }, take: 1 },
@@ -365,6 +365,7 @@ export async function getNotificationPreference(stellarAddressOrId: string) {
   // First try finding applicant by stellarAddress or id
   let applicant = await prisma.applicant.findFirst({
     where: {
+      deletedAt: null,
       OR: [
         { stellarAddress: stellarAddressOrId },
         { id: stellarAddressOrId },
@@ -394,6 +395,7 @@ export async function upsertNotificationPreference(
 ) {
   let applicant = await prisma.applicant.findFirst({
     where: {
+      deletedAt: null,
       OR: [
         { stellarAddress: stellarAddressOrId },
         { id: stellarAddressOrId },
@@ -559,10 +561,17 @@ export async function processUserDataDeletion(stellarAddress: string, reason?: s
         monthlyIncome: null,
         creditScore: null,
         verificationStatus: "INELIGIBLE",
+        deletedAt: new Date(),
         updatedAt: new Date(),
       },
     });
     anonymizedFields.push("taxId", "monthlyIncome", "creditScore");
+
+    await prisma.loanApplication.updateMany({
+      where: { applicantId: applicant.id },
+      data: { deletedAt: new Date() },
+    });
+    anonymizedFields.push("loanApplications");
 
     // 3. Scrub KycDocuments metadata & file references
     await prisma.kycDocument.updateMany({
@@ -610,6 +619,10 @@ export async function processUserDataDeletion(stellarAddress: string, reason?: s
     where: { stellarAddress },
   });
   if (borrower) {
+    await prisma.borrower.update({
+      where: { id: borrower.id },
+      data: { deletedAt: new Date() },
+    });
     anonymizedOnChainRecords.push(
       "escrowBalance",
       "loanOutstanding",
@@ -631,7 +644,7 @@ export async function processUserDataDeletion(stellarAddress: string, reason?: s
         anonymizedFields,
         anonymizedOnChainRecords,
         complianceNotice:
-          "Off-chain PII has been scrubbed. Immutable on-chain transaction metrics are retained anonymously per regulatory standards.",
+          "Off-chain PII has been scrubbed and borrower/loan records are soft-deleted pending compliance retention purge.",
       },
     },
   });

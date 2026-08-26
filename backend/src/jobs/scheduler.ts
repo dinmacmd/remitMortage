@@ -7,6 +7,7 @@ import { runEscrowReconciliation } from "./escrowReconciliation.js";
 import { runApplicationSlaMonitorJob } from "./applicationSlaMonitor.js";
 import { runSessionTokenPurgeJob } from "./sessionTokenPurge.js";
 import { runAdminPortfolioDigestJob } from "./adminPortfolioDigest.js";
+import { runOrphanedRecordCleanupJob } from "./orphanedRecordCleanup.js";
 
 let schedulerTask: ReturnType<typeof cron.schedule> | null = null;
 let kycExpiryTask: ReturnType<typeof cron.schedule> | null = null;
@@ -14,6 +15,7 @@ let escrowReconciliationTask: ReturnType<typeof cron.schedule> | null = null;
 let applicationSlaTask: ReturnType<typeof cron.schedule> | null = null;
 let sessionTokenPurgeTask: ReturnType<typeof cron.schedule> | null = null;
 let adminDigestTask: ReturnType<typeof cron.schedule> | null = null;
+let orphanedRecordCleanupTask: ReturnType<typeof cron.schedule> | null = null;
 
 export function startScheduler() {
   if (schedulerTask) {
@@ -34,6 +36,13 @@ export function startScheduler() {
   sessionTokenPurgeTask = cron.schedule(sessionPurgeSchedule, async () => {
     console.log("[Scheduler] Triggering session token purge job...");
     await runSessionTokenPurgeJob();
+  }, { timezone: "UTC" });
+
+  // Daily at 05:00 UTC: soft-deleted borrower and loan record purge
+  const orphanedCleanupSchedule = process.env.ORPHANED_RECORD_CLEANUP_CRON_SCHEDULE || "0 5 * * *";
+  orphanedRecordCleanupTask = cron.schedule(orphanedCleanupSchedule, async () => {
+    console.log("[Scheduler] Triggering orphaned record cleanup job...");
+    await runOrphanedRecordCleanupJob();
   }, { timezone: "UTC" });
 
   // Daily at 08:00 UTC: KYC document expiry reminders
@@ -67,7 +76,7 @@ export function startScheduler() {
   }, { timezone: "UTC" });
 
   console.log(
-    "[Scheduler] Started: repayment audit, session token purge, KYC expiry reminder, escrow reconciliation, application SLA monitor, and admin portfolio digest jobs scheduled."
+    "[Scheduler] Started: repayment audit, session token purge, orphaned record cleanup, KYC expiry reminder, escrow reconciliation, application SLA monitor, and admin portfolio digest jobs scheduled."
   );
 }
 
@@ -79,6 +88,10 @@ export function stopScheduler() {
   if (sessionTokenPurgeTask) {
     sessionTokenPurgeTask.stop();
     sessionTokenPurgeTask = null;
+  }
+  if (orphanedRecordCleanupTask) {
+    orphanedRecordCleanupTask.stop();
+    orphanedRecordCleanupTask = null;
   }
   if (kycExpiryTask) {
     kycExpiryTask.stop();

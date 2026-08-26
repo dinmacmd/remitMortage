@@ -88,6 +88,10 @@ export interface Config {
   opsSlackWebhookUrl: string | null;
   /** Number of days expired session/refresh tokens are retained before being purged. */
   sessionTokenRetentionDays: number;
+  /** Compliance-reviewed retention window for soft-deleted borrower profiles. */
+  borrowerRecordRetentionDays: number;
+  /** Compliance-reviewed retention window for soft-deleted loan applications. */
+  loanRecordRetentionDays: number;
 }
 
 /** Parses APPLICATION_SLA_HOURS (a JSON map of status -> SLA hours). */
@@ -211,8 +215,16 @@ export function loadConfig(): Config {
       null,
     sessionTokenRetentionDays: parseInt(
       process.env.SESSION_TOKEN_RETENTION_DAYS ||
-      process.env.RETENTION_DAYS ||
-      "7",
+        process.env.RETENTION_DAYS ||
+        "7",
+      10
+    ),
+    borrowerRecordRetentionDays: parseInt(
+      process.env.BORROWER_RECORD_RETENTION_DAYS || "2555",
+      10
+    ),
+    loanRecordRetentionDays: parseInt(
+      process.env.LOAN_RECORD_RETENTION_DAYS || "2555",
       10
     ),
   };

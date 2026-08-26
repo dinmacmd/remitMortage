@@ -162,6 +162,9 @@ model Applicant {
   borrowerCredentials BorrowerCredential[]
   kycDocuments        KycDocument[]
   notificationPreference NotificationPreference?
+  deletedAt          DateTime?
+
+  @@index([deletedAt])
 }
 
 model VerificationResult {
@@ -201,6 +204,7 @@ model LoanApplication {
   assignedReviewerEmail String?
   statusUpdatedAt       DateTime   @default(now())
   slaAlertSentAt        DateTime?
+  deletedAt            DateTime?
 
   // Index backing getApplicationsByBorrower(): filter by applicant then sort by createdAt
   @@index([applicantId, createdAt])
@@ -210,6 +214,7 @@ model LoanApplication {
   @@index([applicantId, status])
   // Composite index for admin queue sorting: WHERE status = '...' ORDER BY createdAt
   @@index([status, createdAt])
+  @@index([deletedAt])
 }
 
 model AuditLog {
@@ -240,11 +245,14 @@ model Borrower {
   lastEventLedger Int                 @default(0)
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
+  deletedAt       DateTime?
 
   deposits        EscrowDeposit[]
   withdrawals     EscrowWithdrawal[]
   disbursements   LoanDisbursement[]
   repayments      LoanRepayment[]
+
+  @@index([deletedAt])
 }
 
 model EscrowDeposit {

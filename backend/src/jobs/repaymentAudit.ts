@@ -16,6 +16,7 @@ export async function runRepaymentAudit() {
     const activeLoans = await prisma.loanApplication.findMany({
       where: {
         status: "ACTIVE",
+        deletedAt: null,
       },
     });
 

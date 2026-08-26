@@ -39,7 +39,7 @@ function mapLoanApplication(record: any): LoanApplication {
 async function findOrCreateApplicant(stellarAddress: string) {
   return prisma.applicant.upsert({
     where: { stellarAddress },
-    update: {},
+    update: { deletedAt: null },
     create: { stellarAddress },
   });
 }
@@ -64,8 +64,8 @@ export async function createApplication(borrowerAddress: string, amount: string)
 }
 
 export async function getApplication(id: string) {
-  const record = await prisma.loanApplication.findUnique({
-    where: { id },
+  const record = await prisma.loanApplication.findFirst({
+    where: { id, deletedAt: null },
     include: { applicant: true },
   });
 
@@ -74,7 +74,7 @@ export async function getApplication(id: string) {
 
 export async function getApplicationsByBorrower(address: string) {
   const records = await prisma.loanApplication.findMany({
-    where: { applicant: { stellarAddress: address } },
+    where: { deletedAt: null, applicant: { stellarAddress: address, deletedAt: null } },
     include: { applicant: true },
   });
 
@@ -83,7 +83,7 @@ export async function getApplicationsByBorrower(address: string) {
 
 export async function getPendingApplications() {
   const records = await prisma.loanApplication.findMany({
-    where: { status: "Pending" },
+    where: { status: "Pending", deletedAt: null },
     include: { applicant: true },
   });
 
@@ -92,14 +92,15 @@ export async function getPendingApplications() {
 
 export async function listApplications() {
   const records = await prisma.loanApplication.findMany({
+    where: { deletedAt: null },
     include: { applicant: true },
   });
   return records.map(mapLoanApplication);
 }
 
 export async function updateApplication(id: string, patch: Partial<LoanApplication>) {
-  const existing = await prisma.loanApplication.findUnique({
-    where: { id },
+  const existing = await prisma.loanApplication.findFirst({
+    where: { id, deletedAt: null },
   });
   if (!existing) return null;
 
@@ -126,8 +127,8 @@ export async function updateApplication(id: string, patch: Partial<LoanApplicati
         data: updateData,
         include: { applicant: true },
       })
-    : await prisma.loanApplication.findUnique({
-        where: { id },
+    : await prisma.loanApplication.findFirst({
+        where: { id, deletedAt: null },
         include: { applicant: true },
       });
 
