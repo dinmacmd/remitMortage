@@ -16,9 +16,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install Gitleaks
+        run: |
+          curl -sSL https://raw.githubusercontent.com/gitleaks/gitleaks/master/scripts/install.sh | bash
+          sudo mv ./bin/gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
       - name: Run Gitleaks
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          config-path: .gitleaks.toml
+        run: gitleaks detect --source . --config .gitleaks.toml --verbose --exit-code 1 --log-opts="--all"
