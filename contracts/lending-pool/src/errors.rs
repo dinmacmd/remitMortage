@@ -95,4 +95,6 @@ pub enum PoolError {
     InvalidCollateralRatio = 44,
     /// Origination fee exceeds the full-disbursement ceiling.
     OriginationFeeTooHigh = 45,
+    /// Refinancing request was submitted before the cooldown window elapsed.
+    RefinanceCooldownActive = 46,
 }

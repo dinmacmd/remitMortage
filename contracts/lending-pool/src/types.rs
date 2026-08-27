@@ -60,6 +60,10 @@ pub struct PoolConfig {
     /// behaviour is unchanged until an admin opts in via
     /// `set_min_deposit_amount`.
     pub min_deposit_amount: i128,
+    /// Minimum number of ledgers between consecutive refinancing requests on
+    /// the same loan. Prevents borrowers from repeatedly refinancing in short
+    /// succession to game interest rate timing. `0` disables the cooldown.
+    pub refinance_cooldown_ledgers: u32,
 }
 
 /// Tracks an individual investor's capital contribution.

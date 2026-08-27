@@ -754,6 +754,8 @@ impl LendingPoolContract {
             // No deposit floor at deployment, so existing integrations are
             // unaffected until an admin sets one via `set_min_deposit_amount`.
             min_deposit_amount: 0,
+            // No refinancing cooldown by default.
+            refinance_cooldown_ledgers: 0,
         };
 
         env.storage().instance().set(&DataKey::Config, &config);
@@ -1352,6 +1354,17 @@ impl LendingPoolContract {
 
         if schedule.payments_missed > 0 {
             return Err(PoolError::RefinanceNotEligible);
+        }
+
+        // Enforce cooldown between consecutive refinancing requests.
+        if config.refinance_cooldown_ledgers > 0 {
+            if let Some(last_refi) = loan.refinanced_at_ledger {
+                let current_ledger = env.ledger().sequence();
+                let elapsed = current_ledger.saturating_sub(last_refi);
+                if elapsed < config.refinance_cooldown_ledgers {
+                    return Err(PoolError::RefinanceCooldownActive);
+                }
+            }
         }
 
         // Accrue any outstanding compound interest before computing what is owed.
@@ -3301,6 +3314,33 @@ impl LendingPoolContract {
             .instance()
             .get::<DataKey, PoolConfig>(&DataKey::Config)
             .map(|config| config.min_deposit_amount)
+            .unwrap_or(0)
+    }
+
+    /// Set the refinancing cooldown period in ledgers.
+    ///
+    /// `0` disables the cooldown entirely (the deployment default).
+    pub fn set_refinance_cooldown_ledgers(env: Env, cooldown: u32) -> Result<(), PoolError> {
+        let mut config = Self::read_config(&env)?;
+        config.admin.require_auth();
+
+        config.refinance_cooldown_ledgers = cooldown;
+        env.storage().instance().set(&DataKey::Config, &config);
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
+
+        env.events().publish((symbol_short!("set_rcool"),), cooldown);
+
+        Ok(())
+    }
+
+    /// Get the currently configured refinancing cooldown in ledgers.
+    pub fn get_refinance_cooldown_ledgers(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get::<DataKey, PoolConfig>(&DataKey::Config)
+            .map(|config| config.refinance_cooldown_ledgers)
             .unwrap_or(0)
     }
 
