@@ -98,6 +98,11 @@ export default async function RootLayout({
   return (
     <html lang={locale} dir={locale === "ar" ? "rtl" : "ltr"} suppressHydrationWarning>
       <head>
+        {/* SRI: This inline theme script is same-origin and not a CDN load, so Subresource Integrity does not apply.
+            It is intentionally inline to avoid FOUC and is protected by CSP script-src 'self'.
+            For any future third-party CDN <script src="https://..."> or <link rel="stylesheet" href="https://...">,
+            use `import { sriProps } from "@/lib/sri"` and spread `{...sriProps(url)}` to enforce
+            integrity="sha384-..." + crossorigin="anonymous". See frontend/src/lib/sri.ts and docs/SRI_AUDIT.md. */}
         <script
           dangerouslySetInnerHTML={{
             __html: `

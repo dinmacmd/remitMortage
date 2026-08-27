@@ -10,7 +10,9 @@
     "type-check": "tsc --noEmit",
     "format:check": "prettier --check .",
     "test": "jest --passWithNoTests",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "sri:hash": "node ./scripts/sri-hash.mjs",
+    "sri:check": "python ../scripts/check-sri.py --frontend ."
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

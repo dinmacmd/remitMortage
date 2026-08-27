@@ -250,3 +250,29 @@ jobs:
         with:
           image: remitmortgage-frontend:${{ github.sha }}
           args: --severity-threshold=high --file=frontend/Dockerfile
+
+  # ── Subresource Integrity (SRI) Check ─────────────────────────────────────
+  # Enforces fix.md #500: every third-party <script src="https://..."> or
+  # <link rel="stylesheet" href="https://..."> must carry integrity + crossorigin.
+  # Uses scripts/check-sri.py which understands sriProps() helper and skips
+  # non-executable links (a href, fetch, img). Fails the job with GitHub
+  # annotations so PRs cannot merge with un-hashed CDN loads.
+  sri-check:
+    name: SRI Check — third-party scripts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run SRI checker
+        run: python scripts/check-sri.py
+
+      - name: Verify SRI helper can generate hashes
+        run: |
+          node frontend/scripts/sri-hash.mjs --text "test" | grep -q "sha384-"
+          echo "sri-hash helper works"
