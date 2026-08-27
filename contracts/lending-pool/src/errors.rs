@@ -97,4 +97,10 @@ pub enum PoolError {
     OriginationFeeTooHigh = 45,
     /// Refinancing request was submitted before the cooldown window elapsed.
     RefinanceCooldownActive = 46,
+    /// Loan assumption is not authorized by borrower or new borrower.
+    AssumptionNotAuthorized = 47,
+    /// No pending loan assumption request found for this loan.
+    AssumptionNotFound = 48,
+    /// A loan assumption request already exists for this loan.
+    AssumptionAlreadyRequested = 49,
 }

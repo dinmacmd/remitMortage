@@ -9,11 +9,14 @@ mod fuzz;
 #[cfg(test)]
 mod upgrade_migration_tests;
 
+#[cfg(test)]
+mod test_loan_assumption;
+
 pub use crate::errors::PoolError;
 pub use crate::types::{
-    BatchDisburseItem, DataKey, HalvingInfo, InvestorRecord, LoanCollateralRecord, LoanRecord,
-    LoanStatus, PendingUpgradeRecord, PoolConfig, PoolHealth, RepaymentSchedule,
-    RestructureProposal, Tranche, TrancheInfo,
+    BatchDisburseItem, DataKey, HalvingInfo, InvestorRecord, LoanAssumptionRequest,
+    LoanCollateralRecord, LoanRecord, LoanStatus, PendingUpgradeRecord, PoolConfig, PoolHealth,
+    RepaymentSchedule, RestructureProposal, Tranche, TrancheInfo,
 };
 use insurance_pool::{premium_for, InsurancePoolContractClient};
 use multisig_validator::MultisigValidatorClient;
@@ -3054,6 +3057,119 @@ impl LendingPoolContract {
     /// dynamic interest rate resolution from verification scores is disabled.
     pub fn get_verification_registry(env: Env) -> Option<Address> {
         Self::read_verification_registry(&env)
+    }
+
+    // ── Loan Assumption Transfer (#561) ───────────────────────────────────
+
+    /// Initiate a loan assumption request to transfer an existing loan's obligations
+    /// to a proposed new borrower. Initiated by the current borrower requiring current borrower authorization.
+    pub fn request_loan_assumption(
+        env: Env,
+        loan_id: BytesN<32>,
+        new_borrower: Address,
+    ) -> Result<(), PoolError> {
+        Self::check_not_paused(&env)?;
+        let loan = Self::read_loan(&env, &loan_id)?;
+
+        if loan.status != LoanStatus::Approved {
+            return Err(PoolError::LoanNotActive);
+        }
+
+        loan.borrower.require_auth();
+
+        if env
+            .storage()
+            .persistent()
+            .has(&DataKey::LoanAssumption(loan_id.clone()))
+        {
+            return Err(PoolError::AssumptionAlreadyRequested);
+        }
+
+        let request = LoanAssumptionRequest {
+            current_borrower: loan.borrower,
+            proposed_borrower: new_borrower,
+            requested_at_ledger: env.ledger().sequence(),
+        };
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::LoanAssumption(loan_id), &request);
+        Ok(())
+    }
+
+    /// Finalize loan assumption transfer to a new borrower.
+    /// Requires dual authorization from both the current borrower and new borrower.
+    /// Re-verifies applicant eligibility before updating loan ownership.
+    pub fn assume_loan(
+        env: Env,
+        loan_id: BytesN<32>,
+        new_borrower: Address,
+    ) -> Result<(), PoolError> {
+        Self::check_not_paused(&env)?;
+        let mut loan = Self::read_loan(&env, &loan_id)?;
+
+        if loan.status != LoanStatus::Approved {
+            return Err(PoolError::LoanNotActive);
+        }
+
+        let request: LoanAssumptionRequest = env
+            .storage()
+            .persistent()
+            .get(&DataKey::LoanAssumption(loan_id.clone()))
+            .ok_or(PoolError::AssumptionNotFound)?;
+
+        if request.proposed_borrower != new_borrower {
+            return Err(PoolError::AssumptionNotAuthorized);
+        }
+
+        // Dual authorization enforcement
+        loan.borrower.require_auth();
+        new_borrower.require_auth();
+
+        // Re-verify new borrower applicant verification if registry is set
+        if let Some(registry_addr) = Self::read_verification_registry(&env) {
+            let registry_client = VerificationRegistryContractClient::new(&env, &registry_addr);
+            if registry_client.try_get_score(&new_borrower).is_err() {
+                return Err(PoolError::ApplicantNotVerified);
+            }
+        }
+
+        // Transfer loan obligations to new borrower
+        loan.borrower = new_borrower;
+        Self::write_loan(&env, &loan_id, &loan);
+
+        // Remove pending assumption request
+        env.storage()
+            .persistent()
+            .remove(&DataKey::LoanAssumption(loan_id));
+        Ok(())
+    }
+
+    /// Cancel a pending loan assumption request. Initiated by current borrower.
+    pub fn cancel_loan_assumption(env: Env, loan_id: BytesN<32>) -> Result<(), PoolError> {
+        Self::check_not_paused(&env)?;
+        let loan = Self::read_loan(&env, &loan_id)?;
+        loan.borrower.require_auth();
+
+        if !env
+            .storage()
+            .persistent()
+            .has(&DataKey::LoanAssumption(loan_id.clone()))
+        {
+            return Err(PoolError::AssumptionNotFound);
+        }
+
+        env.storage()
+            .persistent()
+            .remove(&DataKey::LoanAssumption(loan_id));
+        Ok(())
+    }
+
+    /// Retrieve pending loan assumption request for a loan, if one exists.
+    pub fn get_loan_assumption(env: Env, loan_id: BytesN<32>) -> Option<LoanAssumptionRequest> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::LoanAssumption(loan_id))
     }
 
     // ── Multisig Validator ────────────────────────────────────────────────

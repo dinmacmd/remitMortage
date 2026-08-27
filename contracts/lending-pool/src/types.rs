@@ -317,6 +317,21 @@ pub enum DataKey {
     LoanCollateral(BytesN<32>),
     /// Maps a loan Symbol to its canonical BytesN<32> loan ID.
     LoanSymbolMap(Symbol),
+    /// Pending loan assumption request, keyed by loan ID.
+    LoanAssumption(BytesN<32>),
+}
+
+/// A pending loan assumption request where an existing borrower proposes to transfer
+/// their loan obligations to a new borrower.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct LoanAssumptionRequest {
+    /// Address of the current borrower requesting assumption.
+    pub current_borrower: Address,
+    /// Address of the proposed new borrower assuming the loan.
+    pub proposed_borrower: Address,
+    /// Ledger sequence when the assumption request was initiated.
+    pub requested_at_ledger: u32,
 }
 
 /// Tracks collateral amounts, releases, and minimum collateralization ratio for a loan.
