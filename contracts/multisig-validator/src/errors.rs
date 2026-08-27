@@ -43,4 +43,6 @@ pub enum ValidatorError {
     AdminConfigNotSet = 18,
     /// The proposal has expired (current ledger past expiration_ledger).
     ProposalExpired = 19,
+    /// Signer is penalized for repeated missed votes (weight reduced).
+    SignerPenalized = 20,
 }

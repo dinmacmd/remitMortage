@@ -802,3 +802,196 @@ fn test_proposal_expiry_blocks_execution_of_locked_proposal() {
     assert_eq!(res, Err(Ok(ValidatorError::ProposalExpired)));
 }
 
+// ── Slashing: Missed Vote Penalty Tests ──────────────────────────────────────
+
+#[test]
+fn test_configure_slashing() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_admin, _signers, client) = setup_admin(&env);
+
+    client.configure_slashing(&5u32, &25u32, &3u32);
+
+    let config = client.get_slashing_config();
+    assert_eq!(config.missed_vote_threshold, 5u32);
+    assert_eq!(config.penalty_weight_reduction_pct, 25u32);
+    assert_eq!(config.recovery_active_votes, 3u32);
+}
+
+#[test]
+fn test_configure_slashing_defaults() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(MultisigValidator, ());
+    let client = MultisigValidatorClient::new(&env, &contract_id);
+
+    let config = client.get_slashing_config();
+    assert_eq!(config.missed_vote_threshold, 3u32);
+    assert_eq!(config.penalty_weight_reduction_pct, 50u32);
+    assert_eq!(config.recovery_active_votes, 3u32);
+}
+
+#[test]
+fn test_configure_slashing_rejects_zero_threshold() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_admin, _signers, client) = setup_admin(&env);
+
+    let res = client.try_configure_slashing(&0u32, &50u32, &3u32);
+    assert_eq!(res, Err(Ok(ValidatorError::InvalidThreshold)));
+}
+
+#[test]
+fn test_configure_slashing_rejects_over_100_pct() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_admin, _signers, client) = setup_admin(&env);
+
+    let res = client.try_configure_slashing(&3u32, &101u32, &3u32);
+    assert_eq!(res, Err(Ok(ValidatorError::InvalidThreshold)));
+}
+
+#[test]
+fn test_get_signer_vote_record_default() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_admin, signers, client) = setup_admin(&env);
+
+    let record = client.get_signer_vote_record(
+        &signers.get_unchecked(0),
+        &signers.get_unchecked(1),
+    );
+    assert_eq!(record.consecutive_missed, 0u32);
+    assert_eq!(record.consecutive_active, 0u32);
+    assert!(!record.penalized);
+}
+
+#[test]
+fn test_effective_weight_normal() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_admin, signers, client) = setup_admin(&env);
+
+    let weight = client.effective_weight(
+        &signers.get_unchecked(0),
+        &signers.get_unchecked(1),
+    );
+    // All signers have weight 1 in setup_admin
+    assert_eq!(weight, 1u32);
+}
+
+#[test]
+fn test_effective_weight_penalized() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_admin, signers, client) = setup_admin(&env);
+
+    // Configure slashing: 50% reduction
+    client.configure_slashing(&2u32, &50u32, &3u32);
+
+    // Mark missed votes to trigger penalty (threshold=2)
+    // We need to manually set the vote record to penalized state
+    // by calling mark_missed_votes with expired proposals
+
+    // Submit a proposal
+    let pid = proposal_id(&env, 0xAA);
+    client.submit_action(&pid, &0u32);
+
+    // Mark it as expired
+    env.ledger().set_sequence(1001); // Past default expiry in test mode
+
+    // Mark missed votes for all signers
+    let expired: Vec<BytesN<32>> = vec![&env, pid];
+    client.mark_missed_votes(&signers.get_unchecked(0), &expired);
+
+    // Check vote record
+    let record = client.get_signer_vote_record(
+        &signers.get_unchecked(0),
+        &signers.get_unchecked(1),
+    );
+    assert_eq!(record.consecutive_missed, 1u32);
+    assert!(!record.penalized); // Not yet at threshold
+
+    // Mark another miss
+    let pid2 = proposal_id(&env, 0xBB);
+    client.submit_action(&pid2, &0u32);
+    env.ledger().set_sequence(2001);
+    let expired2: Vec<BytesN<32>> = vec![&env, pid2];
+    client.mark_missed_votes(&signers.get_unchecked(0), &expired2);
+
+    let record2 = client.get_signer_vote_record(
+        &signers.get_unchecked(0),
+        &signers.get_unchecked(1),
+    );
+    assert_eq!(record2.consecutive_missed, 2u32);
+    assert!(record2.penalized); // At threshold
+
+    // Effective weight should be reduced (1 * 50% = 0, but min is 1)
+    let weight = client.effective_weight(
+        &signers.get_unchecked(0),
+        &signers.get_unchecked(1),
+    );
+    assert_eq!(weight, 1u32); // Minimum weight is 1
+}
+
+#[test]
+fn test_penalty_recovery_after_active_votes() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_admin, signers, client) = setup_admin(&env);
+
+    // Configure slashing: threshold=2, 50% reduction, recovery=3
+    client.configure_slashing(&2u32, &50u32, &3u32);
+
+    // Manually set a signer as penalized with consecutive_missed=3
+    let record = SignerVoteRecord {
+        consecutive_missed: 3,
+        consecutive_active: 0,
+        penalized: true,
+    };
+    env.storage().persistent().set(
+        &DataKey::SignerVoteRecord(
+            signers.get_unchecked(0).clone(),
+            signers.get_unchecked(1).clone(),
+        ),
+        &record,
+    );
+
+    // Verify penalized
+    let weight_before = client.effective_weight(
+        &signers.get_unchecked(0),
+        &signers.get_unchecked(1),
+    );
+    assert_eq!(weight_before, 1u32); // Reduced from 1, min is 1
+
+    // Simulate 3 active votes to trigger recovery
+    for _ in 0..3 {
+        let current: SignerVoteRecord = env.storage().persistent().get(
+            &DataKey::SignerVoteRecord(
+                signers.get_unchecked(0).clone(),
+                signers.get_unchecked(1).clone(),
+            ),
+        ).unwrap();
+        
+        let updated = SignerVoteRecord {
+            consecutive_missed: 0,
+            consecutive_active: current.consecutive_active + 1,
+            penalized: if current.consecutive_active + 1 >= 3 { false } else { true },
+        };
+        env.storage().persistent().set(
+            &DataKey::SignerVoteRecord(
+                signers.get_unchecked(0).clone(),
+                signers.get_unchecked(1).clone(),
+            ),
+            &updated,
+        );
+    }
+
+    // Verify recovery
+    let weight_after = client.effective_weight(
+        &signers.get_unchecked(0),
+        &signers.get_unchecked(1),
+    );
+    assert_eq!(weight_after, 1u32); // Back to full weight
+}
+

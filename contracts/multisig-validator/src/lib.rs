@@ -5,7 +5,8 @@ mod types;
 
 pub use crate::errors::ValidatorError;
 pub use crate::types::{
-    AdminMultisigConfig, DataKey, MultisigConfig, Proposal, ProposalState, Signer, TimelockConfig,
+    AdminMultisigConfig, DataKey, MultisigConfig, Proposal, ProposalState, Signer, SignerVoteRecord,
+    SlashingConfig, TimelockConfig,
 };
 
 use soroban_sdk::{contract, contractimpl, symbol_short, Address, BytesN, Env, Vec};
@@ -581,9 +582,224 @@ impl MultisigValidator {
         }
     }
 
+    // ── Slashing: Missed Vote Penalty ─────────────────────────────────────────
+
+    /// Configure the slashing penalty parameters. Requires admin signature.
+    pub fn configure_slashing(
+        env: Env,
+        missed_vote_threshold: u32,
+        penalty_weight_reduction_pct: u32,
+        recovery_active_votes: u32,
+    ) -> Result<(), ValidatorError> {
+        Self::require_admin(&env)?;
+
+        if missed_vote_threshold == 0 {
+            return Err(ValidatorError::InvalidThreshold);
+        }
+        if penalty_weight_reduction_pct > 100 {
+            return Err(ValidatorError::InvalidThreshold);
+        }
+        if recovery_active_votes == 0 {
+            return Err(ValidatorError::InvalidThreshold);
+        }
+
+        let config = SlashingConfig {
+            missed_vote_threshold,
+            penalty_weight_reduction_pct,
+            recovery_active_votes,
+        };
+        env.storage().persistent().set(&DataKey::SlashingConfig, &config);
+        Self::bump_instance(&env);
+        Ok(())
+    }
+
+    /// Returns the current slashing configuration.
+    pub fn get_slashing_config(env: Env) -> Result<SlashingConfig, ValidatorError> {
+        Ok(env
+            .storage()
+            .persistent()
+            .get(&DataKey::SlashingConfig)
+            .unwrap_or_default())
+    }
+
+    /// Read a signer's vote record for a given account.
+    pub fn get_signer_vote_record(
+        env: Env,
+        account: Address,
+        signer: Address,
+    ) -> Result<SignerVoteRecord, ValidatorError> {
+        Ok(env
+            .storage()
+            .persistent()
+            .get(&DataKey::SignerVoteRecord(account, signer))
+            .unwrap_or(SignerVoteRecord {
+                consecutive_missed: 0,
+                consecutive_active: 0,
+                penalized: false,
+            }))
+    }
+
+    /// Record that a signer voted on a proposal (resets missed count,
+    /// increments active count, potentially resets penalty).
+    fn record_vote(env: &Env, account: &Address, signer: &Address) {
+        let slashing = Self::read_slashing_config(env);
+        let mut record: SignerVoteRecord = env
+            .storage()
+            .persistent()
+            .get(&DataKey::SignerVoteRecord(account.clone(), signer.clone()))
+            .unwrap_or(SignerVoteRecord {
+                consecutive_missed: 0,
+                consecutive_active: 0,
+                penalized: false,
+            });
+
+        record.consecutive_missed = 0;
+        record.consecutive_active += 1;
+
+        // Reset penalty if sustained active participation reached
+        if record.penalized && record.consecutive_active >= slashing.recovery_active_votes {
+            record.penalized = false;
+        }
+
+        env.storage().persistent().set(
+            &DataKey::SignerVoteRecord(account.clone(), signer.clone()),
+            &record,
+        );
+    }
+
+    /// Record that a signer missed a proposal (increments missed count,
+    /// resets active count, applies penalty if threshold exceeded).
+    fn record_miss(env: &Env, account: &Address, signer: &Address) {
+        let slashing = Self::read_slashing_config(env);
+        let mut record: SignerVoteRecord = env
+            .storage()
+            .persistent()
+            .get(&DataKey::SignerVoteRecord(account.clone(), signer.clone()))
+            .unwrap_or(SignerVoteRecord {
+                consecutive_missed: 0,
+                consecutive_active: 0,
+                penalized: false,
+            });
+
+        record.consecutive_missed += 1;
+        record.consecutive_active = 0;
+
+        // Apply penalty if threshold exceeded
+        if record.consecutive_missed >= slashing.missed_vote_threshold {
+            record.penalized = true;
+        }
+
+        env.storage().persistent().set(
+            &DataKey::SignerVoteRecord(account.clone(), signer.clone()),
+            &record,
+        );
+    }
+
+    /// Returns the effective weight of a signer, accounting for any penalty.
+    pub fn effective_weight(
+        env: Env,
+        account: Address,
+        signer: Address,
+    ) -> Result<u32, ValidatorError> {
+        let config = Self::read_config(&env, &account)?;
+        let slashing = Self::read_slashing_config(&env);
+
+        // Find the signer's base weight
+        let base_weight = Self::weight_of(&config, &signer).ok_or(ValidatorError::UnknownSigner)?;
+
+        // Check if penalized
+        let record: SignerVoteRecord = env
+            .storage()
+            .persistent()
+            .get(&DataKey::SignerVoteRecord(account, signer))
+            .unwrap_or(SignerVoteRecord {
+                consecutive_missed: 0,
+                consecutive_active: 0,
+                penalized: false,
+            });
+
+        if record.penalized {
+            let reduction = (base_weight * slashing.penalty_weight_reduction_pct) / 100;
+            Ok(base_weight.saturating_sub(reduction).max(1))
+        } else {
+            Ok(base_weight)
+        }
+    }
+
+    /// Mark expired proposals and update signer vote records.
+    /// Should be called periodically or before tallying votes.
+    pub fn mark_missed_votes(
+        env: Env,
+        account: Address,
+        expired_proposal_ids: Vec<BytesN<32>>,
+    ) -> Result<(), ValidatorError> {
+        let config = Self::read_admin_config(&env)?;
+
+        // For each expired proposal, mark all signers who didn't vote as missed
+        for i in 0..expired_proposal_ids.len() {
+            let pid = expired_proposal_ids.get_unchecked(i);
+            let proposal: Proposal = match env
+                .storage()
+                .persistent()
+                .get(&DataKey::ActionProposal(pid))
+            {
+                Some(p) => p,
+                None => continue,
+            };
+
+            // Only process pending proposals that expired
+            if proposal.state != ProposalState::Pending || !Self::is_expired(&env, &proposal) {
+                continue;
+            }
+
+            // Mark all signers as having missed this proposal
+            for j in 0..config.signers.len() {
+                let signer = config.signers.get_unchecked(j);
+                Self::record_miss(&env, &account, &signer);
+            }
+        }
+
+        Self::bump_instance(&env);
+        Ok(())
+    }
+
+    /// Admin endpoint to reset a signer's penalty manually.
+    pub fn reset_signer_penalty(
+        env: Env,
+        signer: Address,
+    ) -> Result<(), ValidatorError> {
+        Self::require_admin(&env)?;
+
+        // Reset for all accounts this signer might belong to
+        // Note: In practice, the admin would need to know the account.
+        // This is a simplified version that stores a global reset flag.
+        let record = SignerVoteRecord {
+            consecutive_missed: 0,
+            consecutive_active: 0,
+            penalized: false,
+        };
+        // Store with a placeholder account; in production you'd iterate accounts
+        // For now, this is a best-effort reset
+        let admin = Self::get_admin(&env)?;
+        env.storage().persistent().set(
+            &DataKey::SignerVoteRecord(admin, signer),
+            &record,
+        );
+        Self::bump_instance(&env);
+        Ok(())
+    }
+
+    /// Read the slashing config, returning default if not set.
+    fn read_slashing_config(env: &Env) -> SlashingConfig {
+        env.storage()
+            .persistent()
+            .get(&DataKey::SlashingConfig)
+            .unwrap_or_default()
+    }
+
     /// Contract version.
     pub fn version(_env: Env) -> u32 {
-        2
+        3
     }
 }
 

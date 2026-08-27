@@ -73,6 +73,41 @@ pub struct AdminMultisigConfig {
     pub threshold: u32,
 }
 
+/// Configuration for the missed-vote slashing penalty system.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct SlashingConfig {
+    /// Number of consecutive missed votes that triggers a penalty.
+    pub missed_vote_threshold: u32,
+    /// Percentage of voting weight to reduce when penalized (0-100).
+    /// E.g. 50 means the signer's effective weight is halved.
+    pub penalty_weight_reduction_pct: u32,
+    /// Number of consecutive active votes required to reset the penalty.
+    pub recovery_active_votes: u32,
+}
+
+impl Default for SlashingConfig {
+    fn default() -> Self {
+        Self {
+            missed_vote_threshold: 3,
+            penalty_weight_reduction_pct: 50,
+            recovery_active_votes: 3,
+        }
+    }
+}
+
+/// Tracks missed-vote and recovery state for a single signer within an account.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct SignerVoteRecord {
+    /// Consecutive proposals this signer missed (resets to 0 on vote).
+    pub consecutive_missed: u32,
+    /// Consecutive proposals this signer voted on (for penalty recovery).
+    pub consecutive_active: u32,
+    /// Whether the signer is currently penalized (weight reduced).
+    pub penalized: bool,
+}
+
 /// Storage keys.
 #[contracttype]
 #[derive(Clone)]
@@ -87,4 +122,8 @@ pub enum DataKey {
     Admin,
     /// The admin-managed `k-of-n` signer configuration.
     AdminConfig,
+    /// Slashing configuration for missed votes.
+    SlashingConfig,
+    /// Per-signer vote record: (account, signer_address) -> SignerVoteRecord.
+    SignerVoteRecord(Address, Address),
 }
