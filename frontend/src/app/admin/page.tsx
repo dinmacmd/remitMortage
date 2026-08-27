@@ -6,6 +6,7 @@ import toast, { Toaster } from "react-hot-toast";
 import { useWallet, OptionalWalletProvider } from "../../context/WalletContext";
 
 const Navbar = dynamic(() => import("../../components/Navbar"), { ssr: false });
+import ActiveLoansMapView from "../../components/ActiveLoansMapView";
 
 // The admin wallet authorized to approve loans and milestones. Configured via
 // NEXT_PUBLIC_ADMIN_ADDRESS at build time.
@@ -209,6 +210,8 @@ function AdminDashboard() {
   return (
     <div className="space-y-8">
       <PoolOverviewCard overview={overview} loading={loading} />
+
+      <ActiveLoansMapView />
 
       <div className="flex gap-2 border-b border-[var(--border-color)]">
         <TabButton active={tab === "loans"} onClick={() => setTab("loans")}>
