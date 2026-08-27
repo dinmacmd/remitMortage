@@ -276,3 +276,24 @@ jobs:
         run: |
           node frontend/scripts/sri-hash.mjs --text "test" | grep -q "sha384-"
           echo "sri-hash helper works"
+
+  # ── Secrets Scanning (Gitleaks) ───────────────────────────────────────────
+  # fix.md #498: Catch accidentally committed API keys, private keys, or
+  # credentials before they land in history. Scans every push and PR.
+  # Uses .gitleaks.toml allowlist for known false positives (test fixtures,
+  # example keys) so safe fixtures don't disable scanning broadly.
+  gitleaks:
+    name: Secrets Scanning (Gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          config-path: .gitleaks.toml

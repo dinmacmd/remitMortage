@@ -1,0 +1,46 @@
+title = "RemitMortgage Gitleaks config"
+
+# Extend default ruleset - catch AKIA, private keys, JWT, generic-api-key, etc.
+[extend]
+  useDefault = true
+
+[[allowlist]]
+  description = "Test fixtures and example keys - not real secrets"
+  # Paths that are known to contain placeholder/low-entropy example values
+  paths = [
+    '''backend/src/__tests__''',
+    '''backend/__tests__''',
+    '''frontend/__tests__''',
+    '''frontend/__mocks__''',
+    '''.*\.test\.ts''',
+    '''.*\.spec\.ts''',
+    '''frontend/package-lock\.json''',
+    '''backend/package-lock\.json''',
+  ]
+  regexes = [
+    '''your_super_secret_webhook_signing_key_here''',
+    '''your_secret_admin_key_here''',
+    '''your_kyc_operator_signing_secret_here''',
+    '''your_backup_encryption_key_here_32chars''',
+    '''your_secure_32_character_key''',
+    '''default_jwt_secret''',
+    '''default_signing_secret_key''',
+    '''default_admin_api_key''',
+    '''default_kyc_operator_secret''',
+    '''default_backend_signing_secret''',
+    '''testing-secret''',
+    '''testuser''',
+    '''testpassword''',
+    '''remituser''',
+    '''remitpass''',
+  ]
+
+# Narrow allowlist for .env.example - only the placeholder patterns, not the whole file
+[[allowlist]]
+  description = "Allow placeholder values in .env.example"
+  paths = ['''backend/\.env\.example''', '''frontend/\.env\.example''']
+  regexes = [
+    '''your_.*_here''',
+    '''your_secure_.*_key''',
+    '''example''',
+  ]
