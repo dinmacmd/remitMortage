@@ -1,0 +1,505 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum NotificationStatus {
+  Pending
+  Sent
+  Failed
+}
+
+enum LoanStatus {
+  Pending
+  Approved
+  Rejected
+  Disbursing
+  Repaying
+  Completed
+}
+
+model Notification {
+  id          String             @id @default(uuid())
+  recipient   String
+  type        String // "EMAIL" or "WEBHOOK"
+  content     String // HTML for emails or JSON payload for webhooks
+  status      NotificationStatus @default(Pending)
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  attempts    Int                @default(0)
+  lastError   String?
+  nextRetryAt DateTime?
+
+  // Index backing the notification scheduler's retry sweep: WHERE status = 'Pending'
+  @@index([status])
+  // Index for retry-at queries: WHERE status = 'Pending' AND nextRetryAt <= now()
+  @@index([status, nextRetryAt])
+}
+
+model InAppNotification {
+  id            String   @id @default(uuid())
+  walletAddress String
+  title         String
+  message       String?
+  variant       String   @default("info")
+  read          Boolean  @default(false)
+  metadata      Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([walletAddress, createdAt(sort: Desc)])
+  @@index([walletAddress, read])
+}
+
+model UnpinnedCid {
+  id           String   @id @default(uuid())
+  cid          String
+  proposalId   String?
+  success      Boolean
+  pinataStatus Int?
+  error        String?
+  createdAt    DateTime @default(now())
+}
+
+/// A KYC document record tracking expiry and reminder state.
+model KycDocument {
+  id                String    @id @default(uuid())
+  applicantId       String
+  applicant         Applicant @relation(fields: [applicantId], references: [id])
+  documentId        String    @unique  // storage key in kycStorage
+  originalName      String
+  mimeType          String
+  uploadedAt        DateTime  @default(now())
+  /// When the document expires (set by operator or derived from document type)
+  expiresAt         DateTime?
+  /// Flags to prevent duplicate reminder emails
+  reminderSent30d   Boolean   @default(false)
+  reminderSent7d    Boolean   @default(false)
+  /// Whether this document is currently blocking loan submissions
+  expired           Boolean   @default(false)
+
+  @@index([applicantId])
+  @@index([expiresAt])
+  @@index([expired])
+}
+
+enum VerificationStatus {
+  PENDING
+  ELIGIBLE
+  INELIGIBLE
+}
+
+
+
+enum WorkspaceRole {
+  OWNER
+  BUILDER
+  VIEWER
+}
+
+enum WorkspaceInvitationStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  EXPIRED
+}
+
+model Workspace {
+  id           String                   @id @default(uuid())
+  name         String
+  slug         String                   @unique
+  createdBy    String
+  createdAt    DateTime                 @default(now())
+  updatedAt    DateTime                 @updatedAt
+  members      WorkspaceMember[]
+  invitations  WorkspaceInvitation[]
+}
+
+model WorkspaceMember {
+  id            String        @id @default(uuid())
+  workspaceId   String
+  workspace     Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  walletAddress String
+  role          WorkspaceRole @default(VIEWER)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@unique([workspaceId, walletAddress])
+  @@index([walletAddress])
+}
+
+model WorkspaceInvitation {
+  id              String                     @id @default(uuid())
+  workspaceId     String
+  workspace       Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  inviteeAddress  String
+  invitedBy       String
+  role            WorkspaceRole              @default(VIEWER)
+  status          WorkspaceInvitationStatus  @default(PENDING)
+  expiresAt       DateTime?
+  createdAt       DateTime                   @default(now())
+  updatedAt       DateTime                   @updatedAt
+
+  @@index([inviteeAddress])
+  @@index([status])
+}
+
+model Applicant {
+  id                 String             @id @default(uuid())
+  stellarAddress     String             @unique
+  verificationStatus VerificationStatus @default(PENDING)
+  creditScore        Int?
+  taxId              String?
+  monthlyIncome      String?
+  displayCurrency    String             @default("USD")
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  verificationResults VerificationResult[]
+  loanApplications    LoanApplication[]
+  borrowerCredentials BorrowerCredential[]
+  kycDocuments        KycDocument[]
+  notificationPreference NotificationPreference?
+}
+
+model VerificationResult {
+  id             String    @id @default(uuid())
+  applicantId    String
+  applicant      Applicant @relation(fields: [applicantId], references: [id])
+  reportHash     String
+  totalPayments  Int
+  totalVolume    Float
+  spanMonths     Float
+  eligible       Boolean
+  analyzedAt     DateTime  @default(now())
+
+  // Index backing getApplicant() which orders verificationResults by analyzedAt desc
+  @@index([applicantId, analyzedAt])
+  // Supports eligibility-filtered queries and analytics scans
+  @@index([eligible])
+}
+
+model LoanApplication {
+  id                 String     @id @default(uuid())
+  applicantId        String
+  applicant          Applicant  @relation(fields: [applicantId], references: [id])
+  escrowContractId   String?
+  loanId             String?
+  principal          Float
+  status             LoanStatus @default(Pending)
+  createdAt          DateTime   @default(now())
+
+  // New fields for repayment tracking
+  dueDate            DateTime?
+  missedPayments     Int        @default(0)
+  lateFeeBalance     Float      @default(0)
+  gracePeriodEndsAt  DateTime?
+
+  // SLA and reviewer tracking fields
+  assignedReviewerEmail String?
+  statusUpdatedAt       DateTime   @default(now())
+  slaAlertSentAt        DateTime?
+
+  // Index backing getApplicationsByBorrower(): filter by applicant then sort by createdAt
+  @@index([applicantId, createdAt])
+  // Index backing getPendingApplications(): WHERE status = 'Pending' — avoids full table scan
+  @@index([status])
+  // Composite index for queries that filter by both applicant and status
+  @@index([applicantId, status])
+  // Composite index for admin queue sorting: WHERE status = '...' ORDER BY createdAt
+  @@index([status, createdAt])
+}
+
+model AuditLog {
+  id           String   @default(uuid())
+  action       String
+  actorAddress String?
+  ipAddress    String?
+  metadata     Json?
+  createdAt    DateTime @default(now())
+
+  @@id([id, createdAt])
+  @@index([action])
+  @@index([actorAddress])
+  @@index([createdAt])
+  // Composite index backing the audit-log query path: filter by event type
+  // (action) then keyset-paginate by createdAt without a table scan.
+  @@index([action, createdAt])
+}
+
+model Borrower {
+  id              String              @id @default(uuid())
+  stellarAddress  String              @unique
+  escrowBalance   String              @default("0")
+  loanOutstanding String              @default("0")
+  totalDeposited  String              @default("0")
+  totalDisbursed  String              @default("0")
+  totalRepaid     String              @default("0")
+  lastEventLedger Int                 @default(0)
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  deposits        EscrowDeposit[]
+  withdrawals     EscrowWithdrawal[]
+  disbursements   LoanDisbursement[]
+  repayments      LoanRepayment[]
+}
+
+model EscrowDeposit {
+  id          String   @id @default(uuid())
+  borrower    Borrower @relation(fields: [borrowerId], references: [id])
+  borrowerId  String
+  contractId  String
+  amount      String
+  ledger      Int
+  eventHash   String   @unique
+  createdAt   DateTime @default(now())
+
+  @@index([borrowerId])
+  @@index([ledger])
+}
+
+model EscrowWithdrawal {
+  id          String   @id @default(uuid())
+  borrower    Borrower @relation(fields: [borrowerId], references: [id])
+  borrowerId  String
+  contractId  String
+  amount      String
+  ledger      Int
+  eventHash   String   @unique
+  createdAt   DateTime @default(now())
+
+  @@index([borrowerId])
+  @@index([ledger])
+}
+
+model LoanDisbursement {
+  id          String   @id @default(uuid())
+  borrower    Borrower @relation(fields: [borrowerId], references: [id])
+  borrowerId  String
+  contractId  String
+  amount      String
+  ledger      Int
+  eventHash   String   @unique
+  createdAt   DateTime @default(now())
+
+  @@index([borrowerId])
+  @@index([ledger])
+}
+
+model LoanRepayment {
+  id          String   @id @default(uuid())
+  borrower    Borrower @relation(fields: [borrowerId], references: [id])
+  borrowerId  String
+  contractId  String
+  amount      String
+  ledger      Int
+  eventHash   String   @unique
+  createdAt   DateTime @default(now())
+
+  @@index([borrowerId])
+  @@index([ledger])
+}
+
+model EventIndexerState {
+  id                  String   @id @default(uuid())
+  key                 String   @unique
+  lastProcessedLedger Int      @default(0)
+  cursor              String?
+  updatedAt           DateTime @updatedAt
+}
+
+enum DataDeletionStatus {
+  PENDING
+  APPROVED
+  COMPLETED
+  REJECTED
+}
+
+model DataDeletionRequest {
+  id            String             @id @default(uuid())
+  walletAddress String
+  status        DataDeletionStatus @default(PENDING)
+  reason        String?
+  requestedAt   DateTime           @default(now())
+  processedAt   DateTime?
+  anonymizedAt  DateTime?
+  details       Json?
+
+  @@index([walletAddress])
+  @@index([status])
+}
+
+model BorrowerCredential {
+  id             String   @id @default(uuid())
+  applicantId    String
+  applicant      Applicant @relation(fields: [applicantId], references: [id])
+  did            String   @unique
+  didHash        String   @unique
+  verificationMethod     String
+  challenge      String?
+  issuer         String?
+  verifiedAt     DateTime @default(now())
+  expiresAt      DateTime?
+  revokedAt      DateTime?
+  isRevoked      Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([applicantId])
+  @@index([did])
+}
+
+model WebhookDLQ {
+  id              String   @id @default(uuid())
+  url             String
+  payload         Json
+  statusCode      Int?
+  responsePayload String?
+  error           String?
+  createdAt       DateTime @default(now())
+}
+
+// ---------------------------------------------------------------------------
+// Webhook subscription model
+// ---------------------------------------------------------------------------
+
+/// The event topics a subscriber can opt into.
+enum WebhookEventTopic {
+  deposit
+  withdraw
+  release
+  disburse
+  repay
+  /// Catch-all — subscriber receives every event kind.
+  all
+}
+
+/// Lifecycle state of a subscription.
+enum WebhookSubscriptionStatus {
+  active
+  paused
+  revoked
+}
+
+/// A partner/third-party webhook endpoint registration.
+/// Each subscription carries its own HMAC secret so secrets can be rotated
+/// per subscriber without affecting any other subscription.
+model WebhookSubscription {
+  id          String                    @id @default(uuid())
+  /// Human-readable label for the subscriber (e.g. "Acme Underwriter").
+  label       String
+  /// The HTTPS endpoint that will receive POST requests.
+  url         String
+  /// Active/primary HMAC-SHA256 signing key (stored encrypted at rest).
+  /// Every outbound delivery is signed with this key.
+  secret      String
+  /// Prior signing key, kept for a grace period immediately after rotation so
+  /// signatures verified against the old key during the transition window
+  /// still validate. Cleared once `previousSecretExpiresAt` has passed.
+  previousSecret String?
+  /// When `previousSecret` stops being accepted and is pruned.
+  previousSecretExpiresAt DateTime?
+  /// When `secret` was last (re)generated — drives the 90-day auto-rotation sweep.
+  secretRotatedAt DateTime               @default(now())
+  /// Comma-separated list of event topics this subscription listens for,
+  /// or a single "all" entry to receive everything.
+  topics      WebhookEventTopic[]
+  status      WebhookSubscriptionStatus @default(active)
+  /// Optional owning wallet address — used to scope management API access.
+  ownerAddress String?
+  createdAt   DateTime                  @default(now())
+  updatedAt   DateTime                  @updatedAt
+
+  deliveries  WebhookDelivery[]
+
+  @@index([status])
+  @@index([ownerAddress])
+  @@index([secretRotatedAt])
+}
+
+/// Immutable delivery attempt record — one row per HTTP attempt.
+/// Successful deliveries and every retry attempt are all persisted so the
+/// full dispatch history is always available for debugging.
+model WebhookDelivery {
+  id             String              @id @default(uuid())
+  subscriptionId String
+  subscription   WebhookSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  /// The event topic that triggered this delivery.
+  topic          String
+  /// Full JSON payload that was (or will be) sent.
+  payload        Json
+  /// HTTP status code returned by the target (null if the request never completed).
+  statusCode     Int?
+  /// Truncated response body from the target (max 2 KB stored).
+  responseBody   String?
+  /// Error message if the fetch itself threw (network error, timeout, etc.).
+  error          String?
+  /// Whether this attempt resulted in a 2xx response.
+  success        Boolean             @default(false)
+  /// Zero-based attempt index (0 = first try, 1 = first retry, …).
+  attempt        Int                 @default(0)
+  /// When the next retry should be attempted (null once terminal).
+  nextRetryAt    DateTime?
+  createdAt      DateTime            @default(now())
+
+  @@index([subscriptionId])
+  @@index([success])
+  @@index([nextRetryAt])
+}
+
+model ApiKey {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  name      String
+  scopes    String[]
+  revoked   Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([key])
+  @@index([revoked])
+}
+
+model NotificationPreference {
+  id                String   @id @default(uuid())
+  applicantId       String   @unique
+  applicant         Applicant @relation(fields: [applicantId], references: [id])
+  email             String?
+  phone             String?
+  emailAlerts       Boolean  @default(true)
+  smsAlerts         Boolean  @default(false)
+  escrowApproaching Boolean  @default(true)
+  escrowReached     Boolean  @default(true)
+  paymentMissed     Boolean  @default(true)
+  loanMilestones    Boolean  @default(true)
+  webhookUrl        String?
+
+  // Business hours throttling fields
+  timezone          String   @default("UTC")
+  businessDays      String   @default("1,2,3,4,5") // Monday-Friday
+  startHour         String   @default("09:00")
+  endHour           String   @default("17:00")
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([applicantId])
+}
+
+model SessionToken {
+  id            String    @id @default(uuid())
+  tokenHash     String    @unique
+  walletAddress String
+  expiresAt     DateTime
+  revokedAt     DateTime?
+  lastUsedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([walletAddress])
+  @@index([expiresAt])
+  @@index([createdAt])
+}
