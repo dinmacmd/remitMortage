@@ -6,6 +6,14 @@ terraform {
       version = "~> 5.0"
     }
   }
+
+  backend "s3" {
+    bucket         = "remit-mortgage-terraform-state"
+    key            = "infrastructure/elk/terraform.tfstate"
+    region         = "us-east-1"
+    dynamodb_table = "remit-mortgage-terraform-locks"
+    encrypt        = true
+  }
 }
 
 provider "aws" {
