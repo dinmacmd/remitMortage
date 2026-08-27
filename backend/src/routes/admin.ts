@@ -3,8 +3,64 @@ import { prisma } from "../services/db.js";
 import { sendWebhook } from "../services/webhook.js";
 import { runEscrowReconciliation } from "../jobs/escrowReconciliation.js";
 import logger from "../utils/logger.js";
+import { requireAdmin, type AuthenticatedRequest } from "../middleware/auth.js";
+import { bulkReviewApplications, type BulkReviewDecision } from "../services/loanStore.js";
 
 export const adminRouter = Router();
+
+/**
+ * @openapi
+ * /api/admin/loans/bulk-review:
+ *   post:
+ *     summary: Approve or reject multiple pending loan applications
+ *     tags:
+ *       - Admin
+ *     security:
+ *       - bearerAuth: []
+ */
+adminRouter.post("/loans/bulk-review", requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  const body = req.body ?? {};
+  const rawItems = Array.isArray(body.reviews)
+    ? body.reviews
+    : Array.isArray(body.applicationIds) && typeof body.decision === "string"
+      ? body.applicationIds.map((applicationId: unknown) => ({ applicationId, decision: body.decision, reason: body.reason }))
+      : null;
+
+  if (!rawItems || rawItems.length === 0 || rawItems.length > 100) {
+    return res.status(400).json({ error: "invalid_request", message: "reviews must contain between 1 and 100 applications" });
+  }
+
+  const items = rawItems.map((item: any) => ({
+    applicationId: typeof item?.applicationId === "string" ? item.applicationId : item?.id,
+    decision: item?.decision,
+    reason: item?.reason,
+  }));
+  if (items.some((item: any) => !item.applicationId || !["approve", "reject"].includes(item.decision))) {
+    return res.status(400).json({ error: "invalid_request", message: "Each review requires an applicationId and an approve or reject decision" });
+  }
+
+  const reviewerAddress = req.user?.walletAddress;
+  if (!reviewerAddress) {
+    return res.status(403).json({ error: "forbidden", message: "Reviewer identity is required" });
+  }
+
+  try {
+    const review = await bulkReviewApplications(
+      items as Array<{ applicationId: string; decision: BulkReviewDecision; reason?: string }>,
+      reviewerAddress,
+      req.ip,
+    );
+    return res.status(200).json({
+      processed: review.results.length,
+      failed: review.failures.length,
+      results: review.results,
+      failures: review.failures,
+    });
+  } catch (error) {
+    logger.error("Bulk loan review error", { error });
+    return res.status(500).json({ error: "bulk_review_failed" });
+  }
+});
 
 // Trigger manual retry of a DLQ job
 adminRouter.post("/webhooks/dlq/:id/retry", async (req: Request, res: Response) => {
