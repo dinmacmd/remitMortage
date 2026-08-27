@@ -160,6 +160,7 @@ CREATE TABLE "LoanApplication" (
     "escrowContractId" TEXT,
     "loanId" TEXT,
     "principal" DOUBLE PRECISION NOT NULL,
+    "interestRateBps" INTEGER NOT NULL DEFAULT 800,
     "status" "LoanStatus" NOT NULL DEFAULT 'Pending',
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "dueDate" TIMESTAMP(3),

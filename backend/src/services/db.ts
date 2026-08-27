@@ -333,13 +333,34 @@ export async function createVerificationResult(data: {
 }
 
 // ── LoanApplication ────────────────────────────────────────────────────────
+// Protocol bounds for interestRateBps (2% floor, 18% cap) — mirrors
+// contracts/verification-registry/src/lib.rs RATE_FLOOR_BPS / RATE_CAP_BPS
+export const LOAN_PRINCIPAL_MIN = 0; // exclusive: principal > 0
+export const LOAN_INTEREST_RATE_MIN_BPS = 200;
+export const LOAN_INTEREST_RATE_MAX_BPS = 1800;
+export const LOAN_INTEREST_RATE_DEFAULT_BPS = 800;
 
 export async function createLoanApplication(data: {
   applicantId: string;
   escrowContractId?: string;
   loanId?: string;
   principal: number;
+  interestRateBps?: number;
 }) {
+  // App-layer validation for fast feedback; DB CHECK is final gate even if bypassed
+  if (data.principal <= LOAN_PRINCIPAL_MIN) {
+    throw new Error(`principal must be > ${LOAN_PRINCIPAL_MIN}`);
+  }
+  if (data.interestRateBps !== undefined) {
+    if (
+      data.interestRateBps < LOAN_INTEREST_RATE_MIN_BPS ||
+      data.interestRateBps > LOAN_INTEREST_RATE_MAX_BPS
+    ) {
+      throw new Error(
+        `interestRateBps must be between ${LOAN_INTEREST_RATE_MIN_BPS} and ${LOAN_INTEREST_RATE_MAX_BPS} (got ${data.interestRateBps})`
+      );
+    }
+  }
   return prisma.loanApplication.create({ data });
 }
 

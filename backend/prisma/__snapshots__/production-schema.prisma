@@ -187,7 +187,8 @@ model LoanApplication {
   applicant          Applicant  @relation(fields: [applicantId], references: [id])
   escrowContractId   String?
   loanId             String?
-  principal          Float
+  principal          Float // DB CHECK: principal > 0 (enforced via migration LoanApplication_principal_check)
+  interestRateBps    Int      @default(800) // DB CHECK: 200 <= interestRateBps <= 1800 (LoanApplication_interestRateBps_check) — protocol floor/cap 2%/18%
   status             LoanStatus @default(Pending)
   createdAt          DateTime   @default(now())
 
