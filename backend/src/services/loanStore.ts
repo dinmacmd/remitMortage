@@ -12,7 +12,8 @@ export type LoanStatus =
   | "Rejected"
   | "Disbursing"
   | "Repaying"
-  | "Completed";
+  | "Completed"
+  | "MANUAL_REVIEW";
 
 export interface LoanApplication {
   id: string;
