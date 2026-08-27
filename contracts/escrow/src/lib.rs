@@ -321,6 +321,72 @@ impl EscrowContract {
         }) // non_reentrant
     }
 
+    /// Top up an existing escrow goal with additional funds.
+    ///
+    /// Unlike `deposit`, this function does NOT update the
+    /// `last_contribution_ledger`, so the maturity/lockup timer remains
+    /// anchored to the original deposit. This lets savers accelerate
+    /// reaching their down-payment target without extending the lockup.
+    pub fn top_up(env: Env, borrower: Address, goal_id: Symbol, amount: i128) -> Result<(), EscrowError> {
+        borrower.require_auth();
+        Self::check_not_paused(&env)?;
+        Self::non_reentrant(&env, || {
+
+        if amount <= 0 {
+            return Err(EscrowError::InvalidAmount);
+        }
+
+        let config = Self::get_config(&env)?;
+        let mut record = Self::get_borrower(&env, &borrower, &goal_id);
+
+        // Cannot top up if no deposits exist, or if already released/withdrawn/seized.
+        if record.deposited == 0 {
+            return Err(EscrowError::EscrowGoalNotFound);
+        }
+        if record.released {
+            return Err(EscrowError::AlreadyReleased);
+        }
+        if record.withdrawn {
+            return Err(EscrowError::AlreadyWithdrawn);
+        }
+        if record.seized {
+            return Err(EscrowError::AlreadySeized);
+        }
+
+        // Transfer USDC from borrower to this contract.
+        let token = get_token_client(&env, &config.token);
+        token.transfer(&borrower, &env.current_contract_address(), &amount);
+
+        // Route to yield vault if configured.
+        if let Some(vault) = &config.yield_vault {
+            let invoke_args = soroban_sdk::vec![&env, env.current_contract_address().into_val(&env), amount.into_val(&env)];
+            let shares: i128 = env.invoke_contract(vault, &Symbol::new(&env, "deposit"), invoke_args);
+
+            record.yield_shares += shares;
+            let total_shares = Self::read_total_yield_shares(&env) + shares;
+            env.storage().instance().set(&DataKey::TotalYieldShares, &total_shares);
+        }
+
+        // Only update deposited amount — do NOT touch start_ledger or
+        // last_contribution_ledger so the lockup timer stays anchored.
+        record.deposited += amount;
+        Self::set_borrower(&env, &borrower, &goal_id, &record);
+
+        // Update total pooled.
+        let total = Self::read_total_pooled(&env) + amount;
+        env.storage().instance().set(&DataKey::TotalPooled, &total);
+
+        Self::extend_instance_ttl(&env);
+
+        env.events().publish(
+            (symbol_short!("top_up"), goal_id.clone()),
+            (borrower.clone(), amount, record.deposited),
+        );
+
+        Ok(())
+        }) // non_reentrant
+    }
+
     /// Withdraw early from the escrow, receiving a refund minus penalty.
     ///
     /// The early withdrawal penalty is deducted as a percentage (basis points)

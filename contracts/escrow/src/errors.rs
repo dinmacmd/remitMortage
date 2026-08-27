@@ -48,4 +48,6 @@ pub enum EscrowError {
     InvalidTtlConfig = 21,
     /// Penalty proposal is not pending.
     PenaltyProposalNotPending = 22,
+    /// Escrow goal does not exist or has no deposits.
+    EscrowGoalNotFound = 23,
 }
