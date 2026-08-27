@@ -42,6 +42,7 @@ import { correlationId } from "./middleware/correlationId.js";
 import { httpMetricsMiddleware } from "./middleware/metricsMiddleware.js";
 import { tracingMiddleware } from "./middleware/tracingMiddleware.js";
 import { authMiddleware } from "./middleware/auth.js";
+import { rlsMiddleware } from "./middleware/rls.js";
 import { startEventIndexer } from "./services/eventIndexer.js";
 import {
   globalRateLimiter,
@@ -159,6 +160,11 @@ app.get("/api/csrf-token", (req, res) => {
   const csrfToken = (req as typeof req & { csrfToken?: string }).csrfToken;
   res.json({ csrfToken, cookieName: CSRF_COOKIE });
 });
+
+// Row-Level Security: sets PostgreSQL session tenant context per-request.
+// Runs after cookie parsing so the auth token is available, but before any
+// route handlers execute database queries.
+app.use(rlsMiddleware);
 
 // Basic rate limiter for verification endpoints: 100 requests per minute per IP
 const verificationLimiter = rateLimit({
