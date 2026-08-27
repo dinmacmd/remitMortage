@@ -45,6 +45,9 @@ pub struct PoolConfig {
     /// off so every unit of interest flows to the tranches. Mutable only via
     /// `set_fee_switch_bps`, which is gated behind the governance multisig.
     pub fee_switch_bps: u32,
+    /// Loan origination fee, in basis points, deducted from each disbursement
+    /// and routed to `treasury_address`. Loan accounting remains gross.
+    pub origination_fee_bps: u32,
     /// Minimum number of ledgers an LP's deposit must remain in the pool
     /// before a withdrawal is allowed. 0 means no lockup.
     pub lockup_duration_ledgers: u32,

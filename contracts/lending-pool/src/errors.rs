@@ -93,4 +93,6 @@ pub enum PoolError {
     CollateralAlreadySeized = 43,
     /// Invalid collateral ratio configuration.
     InvalidCollateralRatio = 44,
+    /// Origination fee exceeds the full-disbursement ceiling.
+    OriginationFeeTooHigh = 45,
 }

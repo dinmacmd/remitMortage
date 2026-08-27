@@ -43,6 +43,8 @@ const DEFAULT_OVERDUE_LEDGERS: u32 = 3 * LEDGERS_PER_MONTH; // ~90 days past due
 // ── Dynamic Fee Structure Constants ──────────────────────────────────
 /// Basis points scale (10000 = 100%).
 const BPS_SCALE: u32 = 10_000;
+/// Origination fees may not exceed 100% of a disbursement.
+const MAX_ORIGINATION_FEE_BPS: u32 = BPS_SCALE;
 /// Utilization threshold for low-fee tier (50%).
 const UTILIZATION_LOW_THRESHOLD_BPS: u32 = 5_000; // 50%
 /// Utilization threshold for medium-fee tier (80%).
@@ -259,6 +261,22 @@ impl LendingPoolContract {
         }
         let fee = (interest * config.fee_switch_bps as i128) / BPS_SCALE as i128;
         (fee, interest - fee)
+    }
+
+    /// Return the fee and net transfer for a gross disbursement. The gross
+    /// amount remains the amount recorded against the loan.
+    fn calculate_origination_fee(
+        config: &PoolConfig,
+        principal: i128,
+    ) -> Result<(i128, i128), PoolError> {
+        if config.origination_fee_bps > MAX_ORIGINATION_FEE_BPS {
+            return Err(PoolError::OriginationFeeTooHigh);
+        }
+        let fee = principal
+            .checked_mul(config.origination_fee_bps as i128)
+            .ok_or(PoolError::InvalidAmount)?
+            / BPS_SCALE as i128;
+        Ok((fee, principal - fee))
     }
 
     fn read_loan(env: &Env, loan_id: &BytesN<32>) -> Result<LoanRecord, PoolError> {
@@ -730,6 +748,8 @@ impl LendingPoolContract {
             // Off at deployment. Turning the switch on is a deliberate
             // governance act, never a deployment-time default.
             fee_switch_bps: 0,
+            // Disabled by default for backwards-compatible deployments.
+            origination_fee_bps: 0,
             lockup_duration_ledgers,
             // No deposit floor at deployment, so existing integrations are
             // unaffected until an admin sets one via `set_min_deposit_amount`.
@@ -1434,6 +1454,11 @@ impl LendingPoolContract {
                 return Err(PoolError::UnauthorizedContractor);
             }
 
+            // Calculate the configurable origination fee from the gross amount.
+            // Loan accounting remains gross; only token transfers use the net.
+            let (origination_fee, net_disbursement) =
+                Self::calculate_origination_fee(&config, amount)?;
+
             // Skim the 5 bps protocol insurance premium off the top. The borrower
             // still owes the full `amount` — the premium is an origination cost
             // that buys the tranches a secondary loss backstop.
@@ -1447,13 +1472,23 @@ impl LendingPoolContract {
             } else {
                 0
             };
+            if net_disbursement < premium {
+                return Err(PoolError::InvalidAmount);
+            }
 
-            // Transfer funds to recipient, net of the premium.
-            token.transfer(
-                &env.current_contract_address(),
-                &recipient,
-                &(amount - premium),
-            );
+            if origination_fee > 0 {
+                token.transfer(
+                    &env.current_contract_address(),
+                    &config.treasury_address,
+                    &origination_fee,
+                );
+            }
+
+            // Transfer the remaining amount to the recipient.
+            let recipient_amount = net_disbursement - premium;
+            if recipient_amount > 0 {
+                token.transfer(&env.current_contract_address(), &recipient, &recipient_amount);
+            }
 
             if let Some(insurance_addr) = insurance_pool {
                 token.transfer(&env.current_contract_address(), &insurance_addr, &premium);
@@ -1614,6 +1649,17 @@ impl LendingPoolContract {
 
             // Perform disbursement for valid item
             let token = Self::token_client(&env, &config.token);
+            let (origination_fee, net_disbursement) =
+                match Self::calculate_origination_fee(&config, item.amount) {
+                    Ok(result) => result,
+                    Err(_) => {
+                        env.events().publish(
+                            (Symbol::new(&env, "batch_skip"), item.loan_id.clone()),
+                            symbol_short!("fee_high"),
+                        );
+                        continue;
+                    }
+                };
             let insurance_pool =
                 Self::read_insurance_pool(&env).filter(|_| premium_for(item.amount) > 0);
             let premium = if insurance_pool.is_some() {
@@ -1621,12 +1667,29 @@ impl LendingPoolContract {
             } else {
                 0
             };
+            if net_disbursement < premium {
+                env.events().publish(
+                    (Symbol::new(&env, "batch_skip"), item.loan_id.clone()),
+                    symbol_short!("fee_amt"),
+                );
+                continue;
+            }
 
-            token.transfer(
-                &env.current_contract_address(),
-                &item.recipient,
-                &(item.amount - premium),
-            );
+            if origination_fee > 0 {
+                token.transfer(
+                    &env.current_contract_address(),
+                    &config.treasury_address,
+                    &origination_fee,
+                );
+            }
+            let recipient_amount = net_disbursement - premium;
+            if recipient_amount > 0 {
+                token.transfer(
+                    &env.current_contract_address(),
+                    &item.recipient,
+                    &recipient_amount,
+                );
+            }
 
             if let Some(insurance_addr) = insurance_pool {
                 token.transfer(&env.current_contract_address(), &insurance_addr, &premium);
@@ -3079,6 +3142,35 @@ impl LendingPoolContract {
     /// switch is off and all interest is distributed to investors.
     pub fn get_fee_switch_bps(env: Env) -> Result<u32, PoolError> {
         Ok(Self::read_config(&env)?.fee_switch_bps)
+    }
+
+    /// Set the loan origination fee in basis points. The fee is deducted from
+    /// disbursement transfers and sent to the existing protocol treasury;
+    /// loan principal and repayment obligations remain gross. Admin-only.
+    pub fn set_origination_fee_bps(env: Env, new_bps: u32) -> Result<(), PoolError> {
+        if new_bps > MAX_ORIGINATION_FEE_BPS {
+            return Err(PoolError::OriginationFeeTooHigh);
+        }
+
+        let mut config = Self::read_config(&env)?;
+        config.admin.require_auth();
+        let previous_bps = config.origination_fee_bps;
+        config.origination_fee_bps = new_bps;
+        env.storage().instance().set(&DataKey::Config, &config);
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
+
+        env.events().publish(
+            (Symbol::new(&env, "orig_fee_set"),),
+            (previous_bps, new_bps),
+        );
+        Ok(())
+    }
+
+    /// Returns the current loan origination fee in basis points.
+    pub fn get_origination_fee_bps(env: Env) -> Result<u32, PoolError> {
+        Ok(Self::read_config(&env)?.origination_fee_bps)
     }
 
     /// Lifetime interest routed to the treasury by the fee switch.
@@ -5539,6 +5631,58 @@ mod test {
         client.disburse(&loan_id, &contractor, &10_000_0000000i128);
 
         assert_eq!(token.balance(&contractor), 10_000_0000000i128);
+    }
+
+    #[test]
+    fn test_origination_fee_is_routed_without_reducing_principal() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (_admin, investor, treasury, token_address, client) = setup_pool(&env);
+        let token = token::Client::new(&env, &token_address);
+        let borrower = Address::generate(&env);
+        let contractor = Address::generate(&env);
+        let loan_id = mock_loan_id(&env);
+        let principal = 100_000_0000000i128;
+
+        client.set_origination_fee_bps(&200);
+        client.deposit(&investor, &150_000_0000000i128, &Tranche::Senior);
+        client.request_loan(&borrower, &loan_id, &principal);
+        client.approve_loan(&loan_id);
+        client.add_contractor(&contractor);
+        client.disburse(&loan_id, &contractor, &principal);
+
+        assert_eq!(token.balance(&contractor), 98_000_0000000i128);
+        assert_eq!(token.balance(&treasury), 2_000_0000000i128);
+        let loan = client.get_loan_info(&loan_id);
+        assert_eq!(loan.principal, principal);
+        assert_eq!(loan.disbursed, principal);
+        assert_eq!(loan.outstanding_debt, principal);
+    }
+
+    #[test]
+    fn test_origination_fee_requires_admin_and_rejects_values_over_100_percent() {
+        use soroban_sdk::testutils::{MockAuth, MockAuthInvoke};
+
+        let env = Env::default();
+        env.mock_all_auths();
+        let (_admin, _investor, _treasury, _token, client) = setup_pool(&env);
+        let attacker = Address::generate(&env);
+        let result = client
+            .mock_auths(&[MockAuth {
+                address: &attacker,
+                invoke: &MockAuthInvoke {
+                    contract: &client.address,
+                    fn_name: "set_origination_fee_bps",
+                    args: (200u32,).into_val(&env),
+                    sub_invokes: &[],
+                },
+            }])
+            .try_set_origination_fee_bps(&200);
+        assert!(result.is_err());
+        assert_eq!(client.get_origination_fee_bps(), 0);
+
+        let result = client.try_set_origination_fee_bps(&(BPS_SCALE + 1));
+        assert_eq!(result.unwrap_err(), Ok(PoolError::OriginationFeeTooHigh));
     }
 
     /// Deploys and initializes an InsurancePool bound to `client`, and wires
