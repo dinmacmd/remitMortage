@@ -1,0 +1,16 @@
+"use client";
+
+import React from "react";
+import { OptionalWalletProvider } from "@/context/WalletContext";
+import { OptionalToastProvider } from "@/context/ToastContext";
+import PayoutHistoryClient from "../payouts/PayoutHistoryClient";
+
+export default function ContractorPayoutHistoryAliasPage() {
+  return (
+    <OptionalToastProvider>
+      <OptionalWalletProvider>
+        <PayoutHistoryClient />
+      </OptionalWalletProvider>
+    </OptionalToastProvider>
+  );
+}
