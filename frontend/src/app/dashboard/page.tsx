@@ -14,6 +14,7 @@ import WithdrawModal from "../../components/WithdrawModal";
 import MilestoneTimeline, { type MilestoneNode } from "../../components/MilestoneTimeline";
 import YieldEstimatorCalculator from "../../components/YieldEstimatorCalculator";
 import VerificationBadge from "../../components/VerificationBadge";
+import LoanPrintSummary from "../../components/LoanPrintSummary";
 import { CreditRecoveryTimeline } from "../../components/CreditRecoveryTimeline";
 import { generateRecoveryPlan, getBorrowerAlert } from "@/lib/creditRecovery";
 import {
@@ -432,6 +433,13 @@ export default function DashboardPage() {
             >
               {t("downloadStatement")}
             </button>
+            <button
+              onClick={() => window.print()}
+              disabled={!status}
+              className="btn-outline-blue disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Print Summary
+            </button>
             <button onClick={() => setShowDeposit(true)} className="btn-cta shadow-cyan-500/20">
               <svg
                 width="18"
@@ -504,6 +512,12 @@ export default function DashboardPage() {
         {/* Loaded Content */}
         {!loading && !error && status && (
           <div className="space-y-8">
+            {/* Print-only loan summary */}
+            <LoanPrintSummary
+              loan={status.loan}
+              escrow={status.escrow}
+              borrowerAddress={publicKey ?? undefined}
+            />
             {/* Dynamic Escrow Maturity & Milestone Alerts Overlay */}
             <MaturityAlertOverlay
               escrow={status.escrow}

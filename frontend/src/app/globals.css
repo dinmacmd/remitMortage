@@ -1239,3 +1239,114 @@ body {
   }
   .rm-verify-page .rm-verify-content > div:nth-child(2) { padding: 18px !important; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+   PRINT-FRIENDLY LOAN SUMMARY
+   ══════════════════════════════════════════════════════════════════════ */
+@media print {
+  body {
+    background: #fff !important;
+    color: #111 !important;
+    font-size: 12pt;
+    line-height: 1.5;
+  }
+
+  /* Hide everything except the print summary */
+  body > *:not(.print-summary) {
+    display: none !important;
+  }
+
+  .print-summary {
+    display: block !important;
+    max-width: 700px;
+    margin: 0 auto;
+    padding: 0;
+    background: #fff;
+    color: #111;
+  }
+
+  .print-header {
+    text-align: center;
+    margin-bottom: 24pt;
+    border-bottom: 2pt solid #111;
+    padding-bottom: 12pt;
+  }
+
+  .print-header h1 {
+    font-size: 18pt;
+    font-weight: 700;
+    margin: 0 0 4pt;
+    color: #111;
+  }
+
+  .print-date {
+    font-size: 10pt;
+    color: #555;
+    margin: 0;
+  }
+
+  .print-section {
+    margin-bottom: 18pt;
+  }
+
+  .print-section h2 {
+    font-size: 13pt;
+    font-weight: 700;
+    margin: 0 0 6pt;
+    padding-bottom: 3pt;
+    border-bottom: 1pt solid #ccc;
+    color: #222;
+  }
+
+  .print-section table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .print-section td {
+    padding: 4pt 0;
+    vertical-align: top;
+    font-size: 11pt;
+  }
+
+  .print-section td.label {
+    width: 40%;
+    color: #555;
+    font-weight: 500;
+  }
+
+  .print-section td.value {
+    color: #111;
+    font-weight: 600;
+  }
+
+  .print-section td.value.mono {
+    font-family: monospace;
+    font-size: 9pt;
+    word-break: break-all;
+  }
+
+  .print-footer {
+    margin-top: 36pt;
+    padding-top: 12pt;
+    border-top: 1pt solid #ccc;
+    font-size: 9pt;
+    color: #777;
+    text-align: center;
+  }
+
+  .print-footer p {
+    margin: 3pt 0;
+  }
+
+  /* Ensure the print summary is visible on screen too (hidden by default) */
+  .print-summary {
+    display: none;
+  }
+
+  /* Hide interactive elements on print */
+  nav, footer, button, .btn-cta, .btn-outline-blue,
+  [data-dnd-kit], .dnd-overlay, [role="status"] {
+    display: none !important;
+  }
+}
