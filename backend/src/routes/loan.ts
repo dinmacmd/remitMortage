@@ -2,6 +2,7 @@ import { Router } from "express";
 import { StrKey } from "@stellar/stellar-sdk";
 import logger from "../utils/logger.js";
 import { validatePositiveNumber } from "../middleware/validate.js";
+import { idempotencyMiddleware } from "../middleware/idempotency.js";
 import {
   createApplication,
   getApplication,
@@ -23,7 +24,7 @@ import {
 } from "../utils/fuzzyMatch.js";
 
 // POST /api/loan/apply
-loanRouter.post("/apply", validatePositiveNumber("amount"), async (req, res) => {
+loanRouter.post("/apply", idempotencyMiddleware, validatePositiveNumber("amount"), async (req, res) => {
   try {
     const { borrowerAddress, amount, fullName, address, idDocumentNumber, taxId } = req.body ?? {};
 
@@ -112,7 +113,7 @@ loanRouter.get("/pending", async (req, res) => {
 });
 
 // POST /api/loan/:id/approve
-loanRouter.post("/:id/approve", async (req, res) => {
+loanRouter.post("/:id/approve", idempotencyMiddleware, async (req, res) => {
   const { id } = req.params;
   const app = await getApplication(id);
   if (!app) return res.status(404).json({ error: "not_found" });
