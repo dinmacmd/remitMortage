@@ -116,6 +116,18 @@ On first deploy, run `terraform apply` to create both services, then trigger the
 
 ---
 
+## Canary Deployment Strategy (#457)
+
+In Kubernetes environment (`devops/k8s/`), backend releases use Nginx Ingress traffic splitting and automated health monitoring:
+
+- **Ramp-Up Stages**: 5% → 25% → 100%
+- **Automation Script**: `./scripts/canary-ramp.sh` or `./devops/canary-ramp.sh`
+- **Auto-Rollback**: Triggered on `/health` probe failures, 5xx error rate > 1%, or latency degradation. Canaries revert `canary-weight` to `0` and scale canary replicas to `0`.
+
+For detailed manifest configuration and policies, see [devops/k8s/README.md](./k8s/README.md).
+
+---
+
 ## Backup Verification
 
 A backup nobody has restored is an assumption, not a recovery plan. The

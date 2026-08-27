@@ -9,8 +9,36 @@ horizontal pod autoscaling.
 | `backend-service.yaml` | ClusterIP Service fronting the backend pods |
 | `backend-configmap.yaml` | ConfigMap defining standard non-sensitive variables |
 | `backend-ingress.yaml` | Ingress mapping external/internal APIs to the ClusterIP Service |
+| `backend-canary-deployment.yaml` | Canary Deployment for releasing candidate images to isolated pod pool |
+| `backend-canary-service.yaml` | ClusterIP Service fronting canary backend pods |
+| `backend-canary-ingress.yaml` | Nginx Ingress annotations for weighted traffic splitting (5% / 25% / 100%) |
 | `backend-hpa.yaml` | HorizontalPodAutoscaler: 2–10 replicas, scale at 80% CPU and 85% Memory |
 | `loadtest-job.yaml` | Job that generates mock request load to verify scale-up |
+
+## Canary Deployment & Automated Traffic Ramp-Up (#457)
+
+RemitMortgage utilizes Nginx Ingress weighted traffic splitting combined with automated health monitoring to safely release new backend versions.
+
+### Ramp-Up Stages
+1. **Stage 1 (5% Weight)**: Initial canary exposure. Ingress routes 5% of incoming live API requests to candidate pods. Hold window: 30s monitoring.
+2. **Stage 2 (25% Weight)**: Mid-tier canary exposure. Ingress routes 25% of incoming traffic to candidate pods. Hold window: 60s monitoring.
+3. **Stage 3 (100% Promotion)**: Complete verification. Canary image is promoted to the primary deployment, canary traffic weight is reset to 0%, and canary replicas are safely scaled down.
+
+### Automated Rollback Thresholds
+Traffic ramp-up is orchestrated via `scripts/canary-ramp.sh`. The script performs HTTP `/health` probes and error rate checks every 2 seconds. Immediate **AUTO-ROLLBACK** is triggered if any of the following occur:
+- **Health Check Failure**: `/health` endpoint returns non-200 HTTP status code.
+- **Error Spike**: 5xx HTTP response rate exceeds 1% of sample window.
+- **Latency Anomaly**: P99 response latency exceeds 500ms.
+
+On rollback:
+- Ingress `canary-weight` is immediately set to `0`.
+- Canary deployment replicas are scaled to `0`.
+- Primary stable deployment handles 100% of user traffic uninterrupted.
+
+### Running Canary Ramp-Up Automation
+```bash
+./scripts/canary-ramp.sh
+```
 
 ## Prerequisites
 

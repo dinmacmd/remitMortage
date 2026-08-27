@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: remitmortgage-backend-canary
+  namespace: default
+  labels:
+    app: remitmortgage-backend-canary
+    track: canary
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: remitmortgage-backend-canary
+      track: canary
+  template:
+    metadata:
+      labels:
+        app: remitmortgage-backend-canary
+        track: canary
+    spec:
+      containers:
+        - name: backend
+          image: remitmortgage/backend:canary
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3001
+              name: http
+          envFrom:
+            - configMapRef:
+                name: remitmortgage-backend-config
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: remitmortgage-backend-secrets
+                  key: database-url
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: remitmortgage-backend-secrets
+                  key: redis-url
+            - name: CANARY_RELEASE
+              value: "true"
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3001
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3001
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 3
