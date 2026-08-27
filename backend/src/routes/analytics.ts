@@ -4,6 +4,10 @@ import {
   getLoanPerformance,
   getDisbursementProgress,
   getMonthlyVolume,
+  getProtocolOverviewFromView,
+  getLoanPerformanceFromView,
+  getDisbursementProgressFromView,
+  getMonthlyVolumeFromView,
 } from "../services/analytics.js";
 import { getLendingPoolRates } from "../services/soroban.js";
 import { feeEstimator } from "../services/feeEstimator.js";
@@ -33,7 +37,7 @@ const MAX_VOLUME_MONTHS = 24;
  */
 analyticsRouter.get("/overview", cacheMiddleware(60), async (req, res) => {
   try {
-    const overview = getProtocolOverview();
+    const overview = (await getProtocolOverviewFromView()) ?? getProtocolOverview();
     const currency = (req.query.currency as string) || "USD";
 
     if (currency !== "USD" && currency !== "USDC") {
@@ -70,10 +74,10 @@ analyticsRouter.get("/overview", cacheMiddleware(60), async (req, res) => {
  *       200:
  *         description: Loan performance metrics.
  */
-analyticsRouter.get("/loans", cacheMiddleware(60), (_req, res) => {
+analyticsRouter.get("/loans", cacheMiddleware(60), async (_req, res) => {
   try {
-    // Loans endpoint returns counts/percentages, not raw currency values
-    res.json(getLoanPerformance());
+    const performance = (await getLoanPerformanceFromView()) ?? getLoanPerformance();
+    res.json(performance);
   } catch (error) {
     console.error("Analytics loans error:", error);
     res.status(500).json({ error: "Failed to compute loan performance" });
@@ -96,7 +100,7 @@ analyticsRouter.get("/loans", cacheMiddleware(60), (_req, res) => {
  */
 analyticsRouter.get("/disbursement", cacheMiddleware(60), async (req, res) => {
   try {
-    const progress = getDisbursementProgress();
+    const progress = (await getDisbursementProgressFromView()) ?? getDisbursementProgress();
     const currency = (req.query.currency as string) || "USD";
 
     if (currency !== "USD" && currency !== "USDC") {
@@ -147,7 +151,7 @@ analyticsRouter.get("/volume", cacheMiddleware(60), async (req, res) => {
       ? Math.min(Math.max(parsed, 1), MAX_VOLUME_MONTHS)
       : DEFAULT_VOLUME_MONTHS;
       
-    const volumeData = getMonthlyVolume(months);
+    const volumeData = (await getMonthlyVolumeFromView(months)) ?? getMonthlyVolume(months);
     const currency = (req.query.currency as string) || "USD";
 
     if (currency !== "USD" && currency !== "USDC") {
