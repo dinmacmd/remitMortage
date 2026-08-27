@@ -10,7 +10,7 @@ use crate::errors::EscrowError;
 use crate::types::{DataKey, EscrowConfig};
 use crate::{EscrowContract, EscrowContractClient};
 use soroban_sdk::{
-    testutils::{Address as _, Ledger as _},
+    testutils::{storage::{Instance, Persistent}, Address as _, Ledger as _},
     token::StellarAssetClient,
     Address, Env, Symbol,
 };

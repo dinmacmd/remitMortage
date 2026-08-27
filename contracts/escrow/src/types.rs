@@ -62,6 +62,10 @@ pub struct BorrowerRecord {
     pub withdrawn: bool,
     /// Whether the collateral was seized by the lending pool due to default.
     pub seized: bool,
+    /// Yield shares allocated from yield vault routing.
+    pub yield_shares: i128,
+    /// Configurable opt-in flag to automatically roll over matured balance into a new savings cycle.
+    pub auto_rollover: bool,
 }
 
 /// Pending upgrade proposal data.
@@ -93,6 +97,8 @@ pub enum DataKey {
     Borrower(Address, Symbol),
     /// Total pooled balance across all borrowers.
     TotalPooled,
+    /// Total yield shares issued.
+    TotalYieldShares,
     /// Current contract version (incremented on each upgrade).
     Version,
     /// Pending upgrade proposal (present only when a timelock delay is active).
@@ -108,4 +114,6 @@ pub enum DataKey {
     /// Optional LendingPool contract address that early-exit penalty fees are
     /// routed to as investor yield. Unset means penalties stay in the contract.
     LendingPool,
+    /// Reentrancy guard flag.
+    ReentrancyGuard,
 }

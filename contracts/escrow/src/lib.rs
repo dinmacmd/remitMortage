@@ -16,14 +16,15 @@ mod test_penalty_bounds;
 #[cfg(test)]
 mod test_ttl_config;
 
+#[cfg(test)]
+mod test_auto_rollover;
+
 pub use crate::errors::EscrowError;
 use crate::token_utils::get_token_client;
 use crate::types::DataKey;
 pub use crate::types::{BorrowerRecord, EscrowConfig, PendingUpgradeRecord, PendingPenaltyProposal};
-use lending_pool::LendingPoolContractClient;
-use soroban_sdk::auth::{ContractContext, InvokerContractAuthEntry, SubContractInvocation};
 use soroban_sdk::{
-    contract, contractimpl, symbol_short, vec, xdr::ToXdr, Address, BytesN, Env, IntoVal, Symbol,
+    contract, contractimpl, symbol_short, Address, Env, IntoVal, Symbol,
 };
 
 // Fallback TTL values, used only before `initialize` has stored a config.
@@ -67,6 +68,8 @@ impl EscrowContract {
                 released: false,
                 withdrawn: false,
                 seized: false,
+                yield_shares: 0,
+                auto_rollover: false,
             })
     }
 
@@ -147,6 +150,13 @@ impl EscrowContract {
             .unwrap_or(0i128)
     }
 
+    fn read_total_yield_shares(env: &Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKey::TotalYieldShares)
+            .unwrap_or(0i128)
+    }
+
     fn read_lending_pool(env: &Env) -> Option<Address> {
         env.storage().instance().get(&DataKey::LendingPool)
     }
@@ -177,6 +187,28 @@ impl EscrowContract {
         } else {
             Ok(())
         }
+    }
+
+    fn non_reentrant<F, R>(env: &Env, f: F) -> R
+    where
+        F: FnOnce() -> R,
+    {
+        let guard: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::ReentrancyGuard)
+            .unwrap_or(false);
+        if guard {
+            panic!("reentrancy");
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::ReentrancyGuard, &true);
+        let result = f();
+        env.storage()
+            .instance()
+            .set(&DataKey::ReentrancyGuard, &false);
+        result
     }
 }
 #[contractimpl]
@@ -380,12 +412,33 @@ impl EscrowContract {
         }) // non_reentrant
     }
 
+    /// Toggle or set the auto-rollover opt-in flag for a borrower's escrow goal.
+    /// Settable by the borrower at creation or any time before maturity.
+    pub fn set_auto_rollover(
+        env: Env,
+        borrower: Address,
+        goal_id: Symbol,
+        auto_rollover: bool,
+    ) -> Result<(), EscrowError> {
+        borrower.require_auth();
+        let mut record = Self::get_borrower(&env, &borrower, &goal_id);
+        if record.released || record.withdrawn || record.seized {
+            return Err(EscrowError::AlreadyReleased);
+        }
+        record.auto_rollover = auto_rollover;
+        Self::set_borrower(&env, &borrower, &goal_id, &record);
+        env.events().publish(
+            (symbol_short!("rollover"), goal_id),
+            (borrower, auto_rollover),
+        );
+        Ok(())
+    }
+
     /// Release a borrower's escrowed funds once the savings target is met
     /// and the minimum lockup duration has elapsed.
     ///
-    /// Only callable by the admin. Transfers the borrower's full deposit
-    /// to the specified recipient address (e.g., the lending pool or
-    /// construction fund). Marks the borrower's record as released.
+    /// If auto_rollover is enabled, mature funds seed a new savings cycle.
+    /// Otherwise, funds are transferred to the specified recipient address.
     pub fn release(
         env: Env,
         borrower: Address,
@@ -412,8 +465,8 @@ impl EscrowContract {
             return Err(EscrowError::AlreadySeized);
         }
 
-        // Verify savings target is met (using the stored goal-specific target).
-        if record.deposited < record.target_amount {
+        // Verify savings target is met.
+        if record.deposited < config.savings_target {
             return Err(EscrowError::TargetNotReached);
         }
 
@@ -438,18 +491,32 @@ impl EscrowContract {
             }
         }
 
-        // Transfer to recipient (e.g., lending pool or construction fund).
-        let token = get_token_client(&env, &config.token);
-        token.transfer(&env.current_contract_address(), &recipient, &amount_withdrawn);
+        let current_ledger = env.ledger().sequence();
 
-        // Update total pooled.
-        let total = Self::read_total_pooled(&env) - record.deposited;
-        env.storage().instance().set(&DataKey::TotalPooled, &total);
+        if record.auto_rollover {
+            // Auto-rollover: seed new cycle with matured balance
+            record.start_ledger = current_ledger;
+            record.last_contribution_ledger = current_ledger;
+            record.deposited = amount_withdrawn;
+            record.released = false;
+            Self::set_borrower(&env, &borrower, &goal_id, &record);
 
-        // Mark as released and persist the cleared balance.
-        record.released = true;
-        record.deposited = 0;
-        Self::set_borrower(&env, &borrower, &goal_id, &record);
+            env.events().publish(
+                (symbol_short!("rollover"), goal_id.clone()),
+                (borrower.clone(), amount_withdrawn),
+            );
+        } else {
+            // Standard release: transfer to recipient
+            let token = get_token_client(&env, &config.token);
+            token.transfer(&env.current_contract_address(), &recipient, &amount_withdrawn);
+
+            let total = Self::read_total_pooled(&env) - record.deposited;
+            env.storage().instance().set(&DataKey::TotalPooled, &total);
+
+            record.released = true;
+            record.deposited = 0;
+            Self::set_borrower(&env, &borrower, &goal_id, &record);
+        }
 
         Self::extend_instance_ttl(&env);
 

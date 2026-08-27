@@ -46,4 +46,6 @@ pub enum EscrowError {
     ReentrancyGuard = 20,
     /// TTL bump amounts and lifetime thresholds must be greater than zero.
     InvalidTtlConfig = 21,
+    /// Penalty proposal is not pending.
+    PenaltyProposalNotPending = 22,
 }
