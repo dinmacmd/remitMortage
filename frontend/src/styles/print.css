@@ -1,0 +1,140 @@
+/* ══════════════════════════════════════════════════════════════════════
+   REMITMORTGAGE PRINT-OPTIMIZED STYLESHEET (#584)
+   ══════════════════════════════════════════════════════════════════════ */
+
+@media print {
+  /* 1. Hide non-essential UI chrome, navigation bars, footers, interactive buttons, modal overlays, and action controls */
+  header,
+  footer,
+  nav,
+  .rm-navbar,
+  .rm-footer,
+  .rm-mobile-nav,
+  .no-print,
+  button,
+  .btn-cta,
+  .btn-primary,
+  .btn-secondary,
+  .btn-outline-blue,
+  .rm-action-button,
+  .rm-hero-actions,
+  [role="dialog"],
+  .glass-overlay,
+  .glass-modal {
+    display: none !important;
+  }
+
+  /* 2. Reset page dimensions, background, margins, and typography for clean print document */
+  @page {
+    size: A4 portrait;
+    margin: 1.5cm;
+  }
+
+  html,
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    font-family: var(--font, sans-serif) !important;
+    font-size: 11pt !important;
+    line-height: 1.4 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+  }
+
+  /* 3. Reflow content containers and remove fixed widths / glass backgrounds */
+  main,
+  .rm-shell,
+  .rm-verify-page main,
+  .rm-invest-page main,
+  .rm-repay-page main,
+  .rm-workflow-shell,
+  .glass-card,
+  .glass-panel {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  /* 4. Table reflow & print formatting */
+  table {
+    width: 100% !important;
+    max-width: 100% !important;
+    border-collapse: collapse !important;
+    margin-bottom: 1rem !important;
+    page-break-inside: auto !important;
+  }
+
+  thead {
+    display: table-header-group !important;
+  }
+
+  tr,
+  th,
+  td {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  th,
+  td {
+    padding: 8px 10px !important;
+    border: 1px solid #d0d0d0 !important;
+    color: #000000 !important;
+    font-size: 10pt !important;
+    text-align: left !important;
+  }
+
+  th {
+    background-color: #f0f0f0 !important;
+    font-weight: bold !important;
+  }
+
+  /* 5. Chart and graphic reflow controls */
+  svg,
+  canvas,
+  img,
+  .rm-progress-ring,
+  .rm-module-grid article,
+  .statement-section,
+  .report-section {
+    max-width: 100% !important;
+    height: auto !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  /* 6. Page-break control utilities */
+  .page-break-before {
+    page-break-before: always !important;
+    break-before: page !important;
+  }
+
+  .page-break-after {
+    page-break-after: always !important;
+    break-after: page !important;
+  }
+
+  .avoid-page-break {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  /* 7. Ensure link URLs or text render clearly without dark backgrounds */
+  a {
+    color: #000000 !important;
+    text-decoration: none !important;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    color: #000000 !important;
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+  }
+}
