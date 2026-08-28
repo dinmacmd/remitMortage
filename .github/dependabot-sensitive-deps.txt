@@ -1,0 +1,10 @@
+# Packages listed here are never auto-merged by the Dependabot Auto-Merge
+# workflow (.github/workflows/dependabot-auto-merge.yml), regardless of
+# semver bump type or CI status. Add one package name per line.
+# Security-sensitive / cryptographic / on-chain dependencies default here.
+@stellar/stellar-sdk
+@stellar/freighter-api
+soroban-sdk
+next
+prisma
+@prisma/client
