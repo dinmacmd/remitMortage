@@ -7,6 +7,7 @@ function makeId() {
 }
 
 export type LoanStatus =
+  | "Draft"
   | "Pending"
   | "Approved"
   | "Rejected"
@@ -116,11 +117,22 @@ export async function updateApplication(id: string, patch: Partial<LoanApplicati
     principal?: string;
     status?: LoanStatus;
     reason?: string | null;
+    lastActivityAt?: Date;
+    draftStaleNotifiedAt?: null;
   } = {};
 
   if (patch.amount !== undefined) updateData.principal = patch.amount;
   if (patch.status !== undefined) updateData.status = patch.status;
   if (patch.reason !== undefined) updateData.reason = patch.reason ?? null;
+
+  // Any edit to a still-Draft application counts as activity: reset the
+  // inactivity clock and clear a pending stale notice, taking it out of
+  // scope for the stale draft cleanup job.
+  const resultingStatus = patch.status ?? existing.status;
+  if (Object.keys(updateData).length && resultingStatus === "Draft") {
+    updateData.lastActivityAt = new Date();
+    updateData.draftStaleNotifiedAt = null;
+  }
 
   const record = Object.keys(updateData).length
     ? await prisma.loanApplication.update({
@@ -134,6 +146,38 @@ export async function updateApplication(id: string, patch: Partial<LoanApplicati
       });
 
   return record ? mapLoanApplication(record) : null;
+}
+
+/** Explicitly resumes a Draft flagged as stale, resetting its inactivity clock. */
+export async function resumeDraftApplication(id: string) {
+  const existing = await prisma.loanApplication.findFirst({
+    where: { id, deletedAt: null, status: "Draft" },
+  });
+  if (!existing) return null;
+
+  const record = await prisma.loanApplication.update({
+    where: { id },
+    data: { lastActivityAt: new Date(), draftStaleNotifiedAt: null },
+    include: { applicant: true },
+  });
+
+  return mapLoanApplication(record);
+}
+
+/** Explicitly discards a Draft application (soft delete) before it would otherwise expire. */
+export async function discardDraftApplication(id: string) {
+  const existing = await prisma.loanApplication.findFirst({
+    where: { id, deletedAt: null, status: "Draft" },
+  });
+  if (!existing) return null;
+
+  const record = await prisma.loanApplication.update({
+    where: { id },
+    data: { deletedAt: new Date() },
+    include: { applicant: true },
+  });
+
+  return mapLoanApplication(record);
 }
 
 export type BulkReviewDecision = "approve" | "reject";

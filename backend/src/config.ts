@@ -92,6 +92,10 @@ export interface Config {
   borrowerRecordRetentionDays: number;
   /** Compliance-reviewed retention window for soft-deleted loan applications. */
   loanRecordRetentionDays: number;
+  /** Days of inactivity before a Draft loan application is flagged as stale and the applicant notified. */
+  draftStaleThresholdDays: number;
+  /** Days after a stale notice before an unresumed Draft is soft-deleted (expired). */
+  draftStaleExpiryGraceDays: number;
 }
 
 /** Parses APPLICATION_SLA_HOURS (a JSON map of status -> SLA hours). */
@@ -225,6 +229,14 @@ export function loadConfig(): Config {
     ),
     loanRecordRetentionDays: parseInt(
       process.env.LOAN_RECORD_RETENTION_DAYS || "2555",
+      10
+    ),
+    draftStaleThresholdDays: parseInt(
+      process.env.DRAFT_STALE_THRESHOLD_DAYS || "90",
+      10
+    ),
+    draftStaleExpiryGraceDays: parseInt(
+      process.env.DRAFT_STALE_EXPIRY_GRACE_DAYS || "7",
       10
     ),
   };

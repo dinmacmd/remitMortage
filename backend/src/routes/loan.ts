@@ -9,6 +9,8 @@ import {
   getApplicationsByBorrower,
   getPendingApplications,
   updateApplication,
+  resumeDraftApplication,
+  discardDraftApplication,
   escrowTargetMetForAmount,
 } from "../services/loanStore.js";
 import { queueNotification } from "../services/notification.js";
@@ -177,6 +179,24 @@ loanRouter.post("/:id/reject", async (req, res) => {
 
   const updated = await updateApplication(id, { status: "Rejected", reason: reason ?? "No reason provided" });
   return res.json(updated);
+});
+
+// POST /api/loan/:id/resume
+// Resumes a Draft application flagged as stale, resetting its inactivity clock.
+loanRouter.post("/:id/resume", async (req, res) => {
+  const { id } = req.params;
+  const resumed = await resumeDraftApplication(id);
+  if (!resumed) return res.status(404).json({ error: "not_found_or_not_draft" });
+  return res.json(resumed);
+});
+
+// POST /api/loan/:id/discard
+// Lets an applicant explicitly discard a Draft application before it would otherwise expire.
+loanRouter.post("/:id/discard", async (req, res) => {
+  const { id } = req.params;
+  const discarded = await discardDraftApplication(id);
+  if (!discarded) return res.status(404).json({ error: "not_found_or_not_draft" });
+  return res.json(discarded);
 });
 
 // GET /api/loan/:id

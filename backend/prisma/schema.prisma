@@ -13,6 +13,7 @@ enum NotificationStatus {
 }
 
 enum LoanStatus {
+  Draft
   Pending
   Approved
   Rejected
@@ -207,6 +208,12 @@ model LoanApplication {
   slaAlertSentAt        DateTime?
   deletedAt            DateTime?
 
+  // Draft inactivity tracking: bumped on any field edit while status = 'Draft'.
+  lastActivityAt        DateTime   @default(now())
+  // Set when the stale-draft cleanup job first flags/notifies this draft.
+  // Cleared on resume, so it also marks whether a notice is outstanding.
+  draftStaleNotifiedAt   DateTime?
+
   // Index backing getApplicationsByBorrower(): filter by applicant then sort by createdAt
   @@index([applicantId, createdAt])
   // Index backing getPendingApplications(): WHERE status = 'Pending' — avoids full table scan
@@ -216,6 +223,8 @@ model LoanApplication {
   // Composite index for admin queue sorting: WHERE status = '...' ORDER BY createdAt
   @@index([status, createdAt])
   @@index([deletedAt])
+  // Composite index backing the stale draft cleanup scan: WHERE status = 'Draft' AND lastActivityAt < cutoff
+  @@index([status, lastActivityAt])
 }
 
 model AuditLog {
