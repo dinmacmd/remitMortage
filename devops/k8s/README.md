@@ -14,6 +14,7 @@ horizontal pod autoscaling.
 | `backend-canary-ingress.yaml` | Nginx Ingress annotations for weighted traffic splitting (5% / 25% / 100%) |
 | `backend-hpa.yaml` | HorizontalPodAutoscaler: 2–10 replicas, scale at 80% CPU and 85% Memory |
 | `loadtest-job.yaml` | Job that generates mock request load to verify scale-up |
+| `anonymized-staging-seed-cronjob.yaml` | Weekly CronJob (staging cluster only) that refreshes the staging DB with an anonymized copy of production data — see [docs/DATA_ANONYMIZATION_PIPELINE.md](../../docs/DATA_ANONYMIZATION_PIPELINE.md) |
 
 ## Canary Deployment & Automated Traffic Ramp-Up (#457)
 

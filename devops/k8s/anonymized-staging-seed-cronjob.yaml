@@ -1,0 +1,59 @@
+# Refreshes the staging database with an anonymized copy of production data
+# on a weekly cadence, via backend/scripts/anonymize-staging-seed.ts.
+#
+# This CronJob is deployed ONLY into the staging cluster/namespace — never
+# into the production cluster — which is the primary safeguard: the
+# production database is reachable solely via `production-readonly-secrets`
+# (a read-only replica credential), and the write target is always
+# `staging-db-secrets` in the same namespace this CronJob runs in. The
+# script itself (see ANONYMIZE_TARGET_ENV below) independently refuses to
+# run unless its target is explicitly confirmed non-production, so a
+# misconfigured secret here still fails closed instead of writing anonymized
+# data over a real database.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: anonymized-staging-seed
+  labels:
+    app: remitmortgage-backend
+    role: staging-data-pipeline
+spec:
+  # Weekly, Sunday 03:00 UTC — off-peak, ahead of the work week.
+  schedule: "0 3 * * 0"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 3600
+      template:
+        metadata:
+          labels:
+            role: staging-data-pipeline
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: anonymize-staging-seed
+              image: remitmortgage/backend:latest
+              command: ["npm", "run", "anonymize:staging-seed"]
+              env:
+                - name: ANONYMIZE_TARGET_ENV
+                  value: "staging"
+                - name: SOURCE_DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: production-readonly-secrets
+                      key: database-url
+                - name: TARGET_DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: staging-db-secrets
+                      key: database-url
+              resources:
+                requests:
+                  cpu: 250m
+                  memory: 512Mi
+                limits:
+                  cpu: 1000m
+                  memory: 1Gi
