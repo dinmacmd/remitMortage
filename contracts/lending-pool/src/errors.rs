@@ -103,4 +103,6 @@ pub enum PoolError {
     AssumptionNotFound = 48,
     /// A loan assumption request already exists for this loan.
     AssumptionAlreadyRequested = 49,
+    /// Withdrawal amount exceeds the pool's configured per-transaction limit.
+    WithdrawalExceedsMaxSingleLimit = 50,
 }

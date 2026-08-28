@@ -759,6 +759,10 @@ impl LendingPoolContract {
             min_deposit_amount: 0,
             // No refinancing cooldown by default.
             refinance_cooldown_ledgers: 0,
+            // No per-transaction withdrawal cap at deployment, so existing
+            // integrations are unaffected until an admin opts in via
+            // `set_max_single_withdrawal`.
+            max_single_withdrawal: 0,
         };
 
         env.storage().instance().set(&DataKey::Config, &config);
@@ -2604,6 +2608,13 @@ impl LendingPoolContract {
                 }
             }
 
+            // ── Max Single Withdrawal Check ───────────────────────────────
+            // Caps the blast radius of a compromised key or contract bug: a
+            // larger position must be split across multiple calls.
+            if config.max_single_withdrawal > 0 && amount > config.max_single_withdrawal {
+                return Err(PoolError::WithdrawalExceedsMaxSingleLimit);
+            }
+
             // ── Dynamic Fee Calculation ───────────────────────────────────
             let utilization_bps = Self::calculate_utilization(&env);
             let fee_bps = Self::calculate_withdrawal_fee_bps(utilization_bps);
@@ -3457,6 +3468,45 @@ impl LendingPoolContract {
             .instance()
             .get::<DataKey, PoolConfig>(&DataKey::Config)
             .map(|config| config.refinance_cooldown_ledgers)
+            .unwrap_or(0)
+    }
+
+    /// Configure the maximum amount an investor may withdraw in a single
+    /// `withdraw` call, in token stroops. Admin-only.
+    ///
+    /// Caps the damage a compromised key or contract bug can cause in one
+    /// transaction: a position larger than the limit must be withdrawn
+    /// across multiple sequential calls.
+    ///
+    /// Pass `0` to disable the cap. Negative values are rejected — the
+    /// intent there is ambiguous, and silently treating them as "off" would
+    /// hide a mistake in a governance transaction.
+    pub fn set_max_single_withdrawal(env: Env, amount: i128) -> Result<(), PoolError> {
+        let mut config = Self::read_config(&env)?;
+        config.admin.require_auth();
+
+        if amount < 0 {
+            return Err(PoolError::InvalidAmount);
+        }
+
+        config.max_single_withdrawal = amount;
+        env.storage().instance().set(&DataKey::Config, &config);
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
+
+        env.events().publish((symbol_short!("set_maxsw"),), amount);
+
+        Ok(())
+    }
+
+    /// Get the currently configured maximum single-transaction withdrawal
+    /// limit, in token stroops. `0` means no cap is enforced.
+    pub fn get_max_single_withdrawal(env: Env) -> i128 {
+        env.storage()
+            .instance()
+            .get::<DataKey, PoolConfig>(&DataKey::Config)
+            .map(|config| config.max_single_withdrawal)
             .unwrap_or(0)
     }
 
@@ -7634,6 +7684,185 @@ mod test {
 
         let record = client.get_investor_info(&investor);
         assert_eq!(record.deposited, 40_000_0000000i128);
+    }
+
+    // ── Maximum single-transaction withdrawal limit ──────────────────────
+
+    /// The cap is off at deployment, so nothing changes for existing pools
+    /// until an admin opts in.
+    #[test]
+    fn test_max_single_withdrawal_defaults_to_zero() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (_admin, investor, _treasury, _token, client) = setup_pool(&env);
+
+        assert_eq!(client.get_max_single_withdrawal(), 0i128);
+        assert_eq!(client.get_pool_config().max_single_withdrawal, 0i128);
+
+        client.deposit(&investor, &50_000_0000000i128, &Tranche::Senior);
+
+        // A large single withdrawal is accepted while the cap is disabled.
+        client.withdraw(&investor, &50_000_0000000i128);
+        assert_eq!(client.get_investor_info(&investor).deposited, 0i128);
+    }
+
+    #[test]
+    fn test_set_max_single_withdrawal_updates_config() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (_admin, _investor, _treasury, _token, client) = setup_pool(&env);
+
+        client.set_max_single_withdrawal(&10_000_0000000i128);
+
+        assert_eq!(client.get_max_single_withdrawal(), 10_000_0000000i128);
+        assert_eq!(
+            client.get_pool_config().max_single_withdrawal,
+            10_000_0000000i128
+        );
+    }
+
+    #[test]
+    fn test_set_max_single_withdrawal_rejects_negative() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (_admin, _investor, _treasury, _token, client) = setup_pool(&env);
+
+        let result = client.try_set_max_single_withdrawal(&-1i128);
+        assert_eq!(result.err().unwrap().unwrap(), PoolError::InvalidAmount);
+        assert_eq!(client.get_max_single_withdrawal(), 0i128);
+    }
+
+    #[test]
+    fn test_non_admin_cannot_set_max_single_withdrawal() {
+        use soroban_sdk::testutils::{MockAuth, MockAuthInvoke};
+        use soroban_sdk::IntoVal;
+
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (_admin, _investor, _treasury, _token, client) = setup_pool(&env);
+        let attacker = Address::generate(&env);
+
+        let result = client
+            .mock_auths(&[MockAuth {
+                address: &attacker,
+                invoke: &MockAuthInvoke {
+                    contract: &client.address,
+                    fn_name: "set_max_single_withdrawal",
+                    args: (10_000_0000000i128,).into_val(&env),
+                    sub_invokes: &[],
+                },
+            }])
+            .try_set_max_single_withdrawal(&10_000_0000000i128);
+
+        assert!(result.is_err());
+        assert_eq!(client.get_max_single_withdrawal(), 0i128);
+    }
+
+    /// Withdrawing exactly at the configured limit is allowed — the check is
+    /// `amount > limit`, not `>=`.
+    #[test]
+    fn test_withdraw_at_limit_succeeds() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (_admin, investor, _treasury, _token, client) = setup_pool(&env);
+        client.deposit(&investor, &50_000_0000000i128, &Tranche::Senior);
+        client.set_max_single_withdrawal(&10_000_0000000i128);
+
+        client.withdraw(&investor, &10_000_0000000i128);
+        assert_eq!(client.get_investor_info(&investor).deposited, 40_000_0000000i128);
+    }
+
+    #[test]
+    fn test_withdraw_just_below_limit_succeeds() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (_admin, investor, _treasury, _token, client) = setup_pool(&env);
+        client.deposit(&investor, &50_000_0000000i128, &Tranche::Senior);
+        client.set_max_single_withdrawal(&10_000_0000000i128);
+
+        client.withdraw(&investor, &9_999_9999999i128);
+        assert_eq!(
+            client.get_investor_info(&investor).deposited,
+            40_000_0000001i128
+        );
+    }
+
+    /// A withdrawal of one stroop over the limit is rejected outright — the
+    /// caller must split it across multiple calls instead.
+    #[test]
+    fn test_withdraw_above_limit_fails() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (_admin, investor, _treasury, _token, client) = setup_pool(&env);
+        client.deposit(&investor, &50_000_0000000i128, &Tranche::Senior);
+        client.set_max_single_withdrawal(&10_000_0000000i128);
+
+        let result = client.try_withdraw(&investor, &10_000_0000001i128);
+        assert_eq!(
+            result.err().unwrap().unwrap(),
+            PoolError::WithdrawalExceedsMaxSingleLimit
+        );
+        // Rejected withdrawal must not touch the investor's balance.
+        assert_eq!(client.get_investor_info(&investor).deposited, 50_000_0000000i128);
+    }
+
+    /// A position larger than the per-call limit must be drained across
+    /// multiple sequential withdrawals, each individually within the cap.
+    #[test]
+    fn test_withdraw_above_limit_requires_multiple_sequential_calls() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (_admin, investor, _treasury, _token, client) = setup_pool(&env);
+        client.deposit(&investor, &25_000_0000000i128, &Tranche::Senior);
+        client.set_max_single_withdrawal(&10_000_0000000i128);
+
+        // One call for the full amount is rejected.
+        let result = client.try_withdraw(&investor, &25_000_0000000i128);
+        assert_eq!(
+            result.err().unwrap().unwrap(),
+            PoolError::WithdrawalExceedsMaxSingleLimit
+        );
+
+        // Three sequential calls, each at or below the cap, succeed.
+        client.withdraw(&investor, &10_000_0000000i128);
+        client.withdraw(&investor, &10_000_0000000i128);
+        client.withdraw(&investor, &5_000_0000000i128);
+
+        assert_eq!(client.get_investor_info(&investor).deposited, 0i128);
+    }
+
+    /// Setting the cap must not disturb any other config field.
+    #[test]
+    fn test_set_max_single_withdrawal_preserves_other_config_fields() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (_admin, _investor, _treasury, _token, client) = setup_pool(&env);
+        let before = client.get_pool_config();
+
+        client.set_max_single_withdrawal(&10_000_0000000i128);
+
+        let after = client.get_pool_config();
+        assert_eq!(after.max_single_withdrawal, 10_000_0000000i128);
+        assert_eq!(after.admin, before.admin);
+        assert_eq!(after.token, before.token);
+        assert_eq!(after.escrow, before.escrow);
+        assert_eq!(after.interest_rate_bps, before.interest_rate_bps);
+        assert_eq!(after.senior_rate_bps, before.senior_rate_bps);
+        assert_eq!(after.treasury_address, before.treasury_address);
+        assert_eq!(after.min_deposit_amount, before.min_deposit_amount);
+        assert_eq!(
+            after.refinance_cooldown_ledgers,
+            before.refinance_cooldown_ledgers
+        );
     }
 
     // ── Minimum deposit amount (dust guard) ──────────────────────────────

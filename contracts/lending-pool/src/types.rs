@@ -64,6 +64,15 @@ pub struct PoolConfig {
     /// the same loan. Prevents borrowers from repeatedly refinancing in short
     /// succession to game interest rate timing. `0` disables the cooldown.
     pub refinance_cooldown_ledgers: u32,
+    /// Maximum amount withdrawable by an investor in a single `withdraw`
+    /// call, in token stroops. Caps the blast radius of a compromised key
+    /// or contract bug: a larger position must be withdrawn across multiple
+    /// transactions rather than drained in one call.
+    ///
+    /// `0` — the deployment default — disables the cap entirely, so existing
+    /// behaviour is unchanged until an admin opts in via
+    /// `set_max_single_withdrawal`.
+    pub max_single_withdrawal: i128,
 }
 
 /// Tracks an individual investor's capital contribution.
