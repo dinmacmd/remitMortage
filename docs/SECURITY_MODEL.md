@@ -193,3 +193,8 @@ practices, which the protocol aims to follow:
 Suspected vulnerabilities should be reported privately to the maintainers
 before public disclosure. Include the affected contract, a reproduction path,
 and the expected vs. actual behaviour.
+
+Recurring penetration test engagements are scheduled quarterly and findings
+are tracked through to remediation via GitHub issues — see
+[`docs/PENTEST_PROGRAM.md`](PENTEST_PROGRAM.md) for the scheduling workflow,
+findings tracker, and open-findings dashboard.
