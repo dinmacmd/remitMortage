@@ -4,6 +4,8 @@ import React, { useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import toast, { Toaster } from "react-hot-toast";
 import { useWallet, OptionalWalletProvider } from "../../context/WalletContext";
+import { EmptyState } from "../../components/EmptyState";
+import { ClipboardList, Hammer } from "lucide-react";
 
 const Navbar = dynamic(() => import("../../components/Navbar"), { ssr: false });
 import ActiveLoansMapView from "../../components/ActiveLoansMapView";
@@ -328,7 +330,16 @@ function PendingLoansTab({
   onReject: (loan: PendingLoan) => void;
 }) {
   if (loading) return <EmptyRow text="Loading pending loans…" />;
-  if (loans.length === 0) return <EmptyRow text="No loan requests awaiting review." />;
+  if (loans.length === 0) {
+    return (
+      <EmptyState
+        icon={<ClipboardList className="h-5 w-5" />}
+        title="No loan requests awaiting review"
+        message="New borrower applications will appear here once submitted."
+        action={{ label: "View pool overview", href: "/stats" }}
+      />
+    );
+  }
 
   return (
     <div className="space-y-3">
@@ -390,7 +401,16 @@ function MilestoneReviewsTab({
   onApprove: (milestone: MilestoneReview) => void;
 }) {
   if (loading) return <EmptyRow text="Loading milestone reviews…" />;
-  if (milestones.length === 0) return <EmptyRow text="No milestones awaiting disbursement." />;
+  if (milestones.length === 0) {
+    return (
+      <EmptyState
+        icon={<Hammer className="h-5 w-5" />}
+        title="No milestones awaiting disbursement"
+        message="Contractor milestone submissions will appear here once evidence is uploaded."
+        action={{ label: "View pool overview", href: "/stats" }}
+      />
+    );
+  }
 
   return (
     <div className="space-y-3">

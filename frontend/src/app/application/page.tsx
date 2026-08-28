@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import { ArrowRight, CheckCircle2, FileText, Landmark, WalletCards } from "lucide-react";
 import { useWallet, OptionalWalletProvider } from "@/context/WalletContext";
+import { EmptyState } from "@/components/EmptyState";
 
 const Navbar = dynamic(() => import("@/components/Navbar"), { ssr: false });
 
@@ -46,7 +47,7 @@ function ApplicationPageInner() {
       </section>
       <aside className="rm-requirements"><h2>Application requirements</h2>{[{icon:CheckCircle2,text:"Verified remittance history"},{icon:WalletCards,text:"Escrow target reached"},{icon:FileText,text:"Identity and KYC complete"}].map(({icon:Icon,text})=><div key={text}><Icon size={17}/><span>{text}</span></div>)}</aside>
     </div>
-    <section className="rm-list-section"><div className="rm-section-row"><div><span>Application history</span><h2>Your financing requests</h2></div><strong>{applications.length}</strong></div>{applications.length === 0 ? <div className="rm-empty-row">No applications found for this wallet.</div> : applications.map((application)=><article className="rm-record-row" key={application.id}><div><FileText size={17}/><span><strong>{Number(application.amount).toLocaleString()} USDC</strong><small>{application.id}</small></span></div><em data-status={application.status.toLowerCase()}>{application.status}</em></article>)}</section>
+    <section className="rm-list-section"><div className="rm-section-row"><div><span>Application history</span><h2>Your financing requests</h2></div><strong>{applications.length}</strong></div>{applications.length === 0 ? <EmptyState icon={<FileText className="h-5 w-5" />} title="No applications yet" message="Submit a financing request above to see it tracked here." action={{ label: "Start an application", onClick: () => document.getElementById("loan-amount")?.focus() }} /> : applications.map((application)=><article className="rm-record-row" key={application.id}><div><FileText size={17}/><span><strong>{Number(application.amount).toLocaleString()} USDC</strong><small>{application.id}</small></span></div><em data-status={application.status.toLowerCase()}>{application.status}</em></article>)}</section>
   </div></main>;
 }
 

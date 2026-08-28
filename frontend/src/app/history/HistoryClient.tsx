@@ -2,7 +2,9 @@
 
 import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import dynamic from "next/dynamic";
+import { ReceiptText } from "lucide-react";
 import { Horizon } from "@stellar/stellar-sdk";
+import { EmptyState } from "@/components/EmptyState";
 import {
   createStatementMetadata,
   downloadStatementCsv,
@@ -589,11 +591,24 @@ export default function HistoryClient() {
             {!loading && !error && (
               <>
                 {sorted.length === 0 ? (
-                  <div className="bg-[var(--bg-card)] border border-[var(--border-color)] rounded-xl p-10 text-center text-[var(--text-secondary)] text-sm">
-                    {records.length === 0
-                      ? "No USDC transactions found for this wallet."
-                      : "No transactions match the selected filters."}
-                  </div>
+                  <EmptyState
+                    icon={<ReceiptText className="h-5 w-5" />}
+                    title={
+                      records.length === 0
+                        ? "No transactions yet"
+                        : "No transactions match the selected filters"
+                    }
+                    message={
+                      records.length === 0
+                        ? "USDC deposits, withdrawals, repayments, and disbursements will appear here once you're active."
+                        : "Try widening your date range or amount filters."
+                    }
+                    action={
+                      records.length === 0
+                        ? { label: "Go to dashboard", href: "/dashboard" }
+                        : undefined
+                    }
+                  />
                 ) : (
                   <div className="bg-[var(--bg-card)] border border-[var(--border-color)] rounded-xl overflow-hidden">
                     <div className="overflow-x-auto">

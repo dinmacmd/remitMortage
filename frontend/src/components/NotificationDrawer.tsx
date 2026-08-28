@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { BellRing, Check, CheckCheck, X, Trash2, CheckCircle2, AlertCircle, Info, AlertTriangle } from "lucide-react";
 import { useNotifications, ToastVariant } from "@/context/NotificationContext";
+import { EmptyState } from "@/components/EmptyState";
 
 function formatRelativeTime(createdAt: number) {
   const diffMs = Date.now() - createdAt;
@@ -153,19 +154,21 @@ export function NotificationDrawer() {
           {/* List Feed */}
           <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
             {filteredItems.length === 0 ? (
-              <div className="flex h-full flex-col items-center justify-center rounded-2xl border border-dashed border-slate-800 bg-slate-950/30 px-6 py-12 text-center">
-                <div className="mb-4 rounded-full border border-cyan-500/20 bg-cyan-500/10 p-3 text-cyan-300">
-                  <BellRing className="h-5 w-5" />
-                </div>
-                <p className="text-sm font-semibold text-white">
-                  {activeTab === "unread" ? "No unread notifications" : "No notifications yet"}
-                </p>
-                <p className="mt-1 text-xs text-slate-400 max-w-xs">
-                  {activeTab === "unread"
+              <EmptyState
+                className="h-full"
+                icon={<BellRing className="h-5 w-5" />}
+                title={activeTab === "unread" ? "No unread notifications" : "No notifications yet"}
+                message={
+                  activeTab === "unread"
                     ? "You've read all your notifications!"
-                    : "Contract activity, escrow deposits, and loan events will appear here."}
-                </p>
-              </div>
+                    : "Contract activity, escrow deposits, and loan events will appear here."
+                }
+                action={
+                  activeTab === "unread"
+                    ? undefined
+                    : { label: "Go to dashboard", href: "/dashboard" }
+                }
+              />
             ) : (
               filteredItems.map((item) => (
                 <article
