@@ -15,6 +15,12 @@ import { createChallenge, consumeChallenge } from "../services/challengeStore.js
 import { verifyEvmSignature } from "../services/evm.js";
 import { verifySolanaSignature } from "../services/solana.js";
 import { upsertApplicant, createVerificationResult } from "../services/db.js";
+import {
+  evaluateLoginLocation,
+  recordLoginLocation,
+  generateStepUpCode,
+  verifyStepUpCode,
+} from "../services/locationAnomalyService.js";
 
 export const verificationRouter = Router();
 
@@ -296,6 +302,25 @@ verificationRouter.post("/verify-ownership", verificationOwnershipRateLimiter, v
     return;
   }
 
+  const clientIp = (req.headers["x-forwarded-for"] as string) || req.ip || "127.0.0.1";
+  const locationCheck = evaluateLoginLocation(walletAddress, clientIp);
+
+  if (locationCheck.requiresStepUp) {
+    const stepUpCode = generateStepUpCode(walletAddress);
+    res.status(202).json({
+      verified: true,
+      stepUpRequired: true,
+      reason: locationCheck.reason,
+      walletAddress,
+      network,
+      stepUpCode,
+      message: "Anomalous login location detected. Step-up verification code required.",
+    });
+    return;
+  }
+
+  recordLoginLocation(walletAddress, clientIp);
+
   const token = jwt.sign(
     { walletAddress, network },
     process.env.JWT_SECRET || "default_jwt_secret",
@@ -309,5 +334,65 @@ verificationRouter.post("/verify-ownership", verificationOwnershipRateLimiter, v
     maxAge: 24 * 60 * 60 * 1000, // 24 hours
   });
 
-  res.json({ verified: true, walletAddress, network });
+  res.json({ verified: true, walletAddress, network, stepUpRequired: false });
 });
+
+/**
+ * @openapi
+ * /api/verification/step-up:
+ *   post:
+ *     summary: Verify step-up confirmation code for anomalous logins
+ *     tags: [Verification]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [walletAddress, network, code]
+ *             properties:
+ *               walletAddress:
+ *                 type: string
+ *               network:
+ *                 type: string
+ *               code:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Step-up verification successful and session token granted.
+ *       401:
+ *         description: Invalid or expired confirmation code.
+ */
+verificationRouter.post("/step-up", (req, res) => {
+  const { walletAddress, network, code } = req.body;
+
+  if (!walletAddress || !code) {
+    res.status(400).json({ error: "missing_field", message: "walletAddress and code are required" });
+    return;
+  }
+
+  const isValid = verifyStepUpCode(walletAddress, code);
+  if (!isValid) {
+    res.status(401).json({ error: "invalid_step_up_code", message: "Step-up code is invalid or expired" });
+    return;
+  }
+
+  const clientIp = (req.headers["x-forwarded-for"] as string) || req.ip || "127.0.0.1";
+  recordLoginLocation(walletAddress, clientIp);
+
+  const token = jwt.sign(
+    { walletAddress, network: network || "stellar" },
+    process.env.JWT_SECRET || "default_jwt_secret",
+    { expiresIn: "24h" }
+  );
+
+  res.cookie("token", token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "strict",
+    maxAge: 24 * 60 * 60 * 1000,
+  });
+
+  res.json({ verified: true, walletAddress, network: network || "stellar", stepUpCompleted: true });
+});
+
