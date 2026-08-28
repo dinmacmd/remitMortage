@@ -427,4 +427,87 @@ mod test {
         let err = client.try_initialize(&admin, &token_address, &lending_pool);
         assert_eq!(err, Err(Ok(InsuranceError::AlreadyInitialized)));
     }
+
+    #[test]
+    fn test_partial_tranche_loss_claim_payouts_severities() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (_admin, lending_pool, token_address, client) = setup(&env);
+
+        let sac = StellarAssetClient::new(&env, &token_address);
+        // Mint 200,000 USDC into the insurance pool reserve
+        sac.mint(&client.address, &200_000_0000000i128);
+        client.record_premium(&lending_pool, &200_000_0000000i128);
+
+        let expected_repayment = 100_000_0000000i128; // 100,000 USDC tranche
+
+        // 10% partial tranche loss -> Shortfall = 10,000 USDC
+        let shortfall_10 = expected_repayment * 10 / 100;
+        client.claim(&lending_pool, &shortfall_10);
+        assert_eq!(shortfall_10, 10_000_0000000i128);
+        assert_ne!(shortfall_10, expected_repayment); // Payout matches shortfall, not full tranche
+
+        // 50% partial tranche loss -> Shortfall = 50,000 USDC
+        let shortfall_50 = expected_repayment * 50 / 100;
+        client.claim(&lending_pool, &shortfall_50);
+        assert_eq!(shortfall_50, 50_000_0000000i128);
+
+        // 90% partial tranche loss -> Shortfall = 90,000 USDC
+        let shortfall_90 = expected_repayment * 90 / 100;
+        client.claim(&lending_pool, &shortfall_90);
+        assert_eq!(shortfall_90, 90_000_0000000i128);
+
+        assert_eq!(client.get_total_claimed(), 150_000_0000000i128);
+        assert_eq!(client.get_reserves(), 50_000_0000000i128);
+    }
+
+    #[test]
+    fn test_claim_payout_capped_by_reserve_balance() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (_admin, lending_pool, token_address, client) = setup(&env);
+
+        let sac = StellarAssetClient::new(&env, &token_address);
+        sac.mint(&client.address, &30_000_0000000i128);
+        client.record_premium(&lending_pool, &30_000_0000000i128);
+
+        let tranche_expected = 100_000_0000000i128;
+        let partial_shortfall_50 = tranche_expected * 50 / 100; // 50,000 USDC shortfall
+
+        // Claiming 50,000 USDC when reserve is only 30,000 USDC must fail
+        let result = client.try_claim(&lending_pool, &partial_shortfall_50);
+        assert_eq!(result, Err(Ok(InsuranceError::InsufficientReserves)));
+        assert_eq!(client.get_reserves(), 30_000_0000000i128);
+    }
+
+    #[test]
+    fn test_sequential_claims_deplete_reserves_progressively() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (_admin, lending_pool, token_address, client) = setup(&env);
+
+        let sac = StellarAssetClient::new(&env, &token_address);
+        sac.mint(&client.address, &100_000_0000000i128);
+        client.record_premium(&lending_pool, &100_000_0000000i128);
+
+        // Claim 1: Partial loss default #1 (40,000 USDC shortfall)
+        client.claim(&lending_pool, &40_000_0000000i128);
+        assert_eq!(client.get_reserves(), 60_000_0000000i128);
+
+        // Claim 2: Partial loss default #2 (50,000 USDC shortfall)
+        client.claim(&lending_pool, &50_000_0000000i128);
+        assert_eq!(client.get_reserves(), 10_000_0000000i128);
+
+        // Claim 3: Partial loss default #3 (20,000 USDC shortfall) -> Exceeds remaining 10,000 reserve
+        let err = client.try_claim(&lending_pool, &20_000_0000000i128);
+        assert_eq!(err, Err(Ok(InsuranceError::InsufficientReserves)));
+
+        // Claim 3 adjusted to remaining reserve balance (10,000 USDC) -> Exhausts reserve to 0
+        client.claim(&lending_pool, &10_000_0000000i128);
+        assert_eq!(client.get_reserves(), 0);
+
+        // Claim 4: Any further claim rejected
+        let err2 = client.try_claim(&lending_pool, &1_0000000i128);
+        assert_eq!(err2, Err(Ok(InsuranceError::InsufficientReserves)));
+    }
 }
