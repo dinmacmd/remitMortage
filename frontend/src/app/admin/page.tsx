@@ -5,10 +5,11 @@ import dynamic from "next/dynamic";
 import toast, { Toaster } from "react-hot-toast";
 import { useWallet, OptionalWalletProvider } from "../../context/WalletContext";
 import { EmptyState } from "../../components/EmptyState";
-import { ClipboardList, Hammer } from "lucide-react";
+import { ClipboardList, Hammer, History } from "lucide-react";
 
 const Navbar = dynamic(() => import("../../components/Navbar"), { ssr: false });
 import ActiveLoansMapView from "../../components/ActiveLoansMapView";
+import AuditLogViewer from "../../components/AuditLogViewer";
 
 // The admin wallet authorized to approve loans and milestones. Configured via
 // NEXT_PUBLIC_ADMIN_ADDRESS at build time.
@@ -127,7 +128,7 @@ function AdminShell({ children }: { children: React.ReactNode }) {
 
 // ── Dashboard ────────────────────────────────────────────────────────────────
 
-type Tab = "loans" | "milestones";
+type Tab = "loans" | "milestones" | "audit";
 
 function AdminDashboard() {
   const [tab, setTab] = useState<Tab>("loans");
@@ -224,6 +225,10 @@ function AdminDashboard() {
           Milestone Reviews
           {milestones.length > 0 && <Count value={milestones.length} />}
         </TabButton>
+        <TabButton active={tab === "audit"} onClick={() => setTab("audit")}>
+          <History className="h-3.5 w-3.5 mr-1.5" />
+          Audit Log
+        </TabButton>
       </div>
 
       {tab === "loans" ? (
@@ -233,12 +238,14 @@ function AdminDashboard() {
           onApprove={(loan) => setPendingAction({ kind: "approve-loan", loan })}
           onReject={(loan) => setPendingAction({ kind: "reject-loan", loan })}
         />
-      ) : (
+      ) : tab === "milestones" ? (
         <MilestoneReviewsTab
           milestones={milestones}
           loading={loading}
           onApprove={(milestone) => setPendingAction({ kind: "approve-milestone", milestone })}
         />
+      ) : (
+        <AuditLogViewer />
       )}
 
       {pendingAction && (
