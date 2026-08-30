@@ -50,4 +50,22 @@ pub enum EscrowError {
     PenaltyProposalNotPending = 22,
     /// Escrow goal does not exist or has no deposits.
     EscrowGoalNotFound = 23,
+    /// No beneficiary is configured for the owner and goal.
+    BeneficiaryNotConfigured = 24,
+    /// Caller is not the configured beneficiary.
+    UnauthorizedBeneficiary = 25,
+    /// The configured inactivity period has not elapsed.
+    BeneficiaryInactivityNotElapsed = 26,
+    /// Provided attestors do not satisfy the configured quorum.
+    InsufficientAttestationQuorum = 27,
+    /// An attestation is malformed, duplicated, or from an unknown signer.
+    InvalidAttestation = 28,
+    /// The beneficiary recovery has already completed.
+    BeneficiaryAlreadyClaimed = 29,
+    /// The escrow has no funds that can be recovered.
+    NoClaimableFunds = 30,
+    /// The configured inactivity period is invalid.
+    InvalidInactivityPeriod = 31,
+    /// The configured attestor set or quorum is invalid.
+    InvalidAttestorConfig = 32,
 }

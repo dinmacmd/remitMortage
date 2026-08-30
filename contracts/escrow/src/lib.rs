@@ -19,10 +19,16 @@ mod test_ttl_config;
 #[cfg(test)]
 mod test_auto_rollover;
 
+#[cfg(test)]
+mod beneficiary_tests;
+
 pub use crate::errors::EscrowError;
 use crate::token_utils::get_token_client;
 use crate::types::DataKey;
-pub use crate::types::{BorrowerRecord, EscrowConfig, PendingUpgradeRecord, PendingPenaltyProposal};
+pub use crate::types::{
+    BeneficiaryAttestorConfig, BorrowerRecord, EscrowConfig, PendingPenaltyProposal,
+    PendingUpgradeRecord,
+};
 use soroban_sdk::{
     contract, contractimpl, symbol_short, Address, Env, IntoVal, Symbol,
 };
@@ -90,6 +96,31 @@ impl EscrowContract {
         let key = DataKey::Borrower(borrower.clone(), goal_id.clone());
         env.storage().persistent().set(&key, record);
         Self::extend_persistent_ttl(env, &key);
+    }
+
+    fn record_owner_activity(env: &Env, borrower: &Address, goal_id: &Symbol) {
+        let key = DataKey::LastOwnerActivity(borrower.clone(), goal_id.clone());
+        env.storage().persistent().set(&key, &env.ledger().sequence());
+        Self::extend_persistent_ttl(env, &key);
+    }
+
+    fn last_owner_activity(env: &Env, borrower: &Address, goal_id: &Symbol, record: &BorrowerRecord) -> u32 {
+        env.storage().persistent().get(&DataKey::LastOwnerActivity(borrower.clone(), goal_id.clone()))
+            .unwrap_or(record.last_contribution_ledger.max(record.start_ledger))
+    }
+
+    fn validate_attestor_config(signers: &soroban_sdk::Vec<Address>, threshold: u32) -> Result<(), EscrowError> {
+        if signers.is_empty() || threshold == 0 || threshold > signers.len() {
+            return Err(EscrowError::InvalidAttestorConfig);
+        }
+        for i in 0..signers.len() {
+            for j in (i + 1)..signers.len() {
+                if signers.get_unchecked(i) == signers.get_unchecked(j) {
+                    return Err(EscrowError::InvalidAttestorConfig);
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Extend the instance TTL using the configured bump parameters.
@@ -305,6 +336,7 @@ impl EscrowContract {
         record.last_contribution_ledger = current_ledger;
         record.deposited += amount;
         Self::set_borrower(&env, &borrower, &goal_id, &record);
+        Self::record_owner_activity(&env, &borrower, &goal_id);
 
         // Update total pooled.
         let total = Self::read_total_pooled(&env) + amount;
@@ -371,6 +403,7 @@ impl EscrowContract {
         // last_contribution_ledger so the lockup timer stays anchored.
         record.deposited += amount;
         Self::set_borrower(&env, &borrower, &goal_id, &record);
+        Self::record_owner_activity(&env, &borrower, &goal_id);
 
         // Update total pooled.
         let total = Self::read_total_pooled(&env) + amount;
@@ -466,6 +499,7 @@ impl EscrowContract {
         record.withdrawn = true;
         record.deposited = 0;
         Self::set_borrower(&env, &borrower, &goal_id, &record);
+        Self::record_owner_activity(&env, &borrower, &goal_id);
 
         Self::extend_instance_ttl(&env);
 
@@ -493,6 +527,7 @@ impl EscrowContract {
         }
         record.auto_rollover = auto_rollover;
         Self::set_borrower(&env, &borrower, &goal_id, &record);
+        Self::record_owner_activity(&env, &borrower, &goal_id);
         env.events().publish(
             (symbol_short!("rollover"), goal_id),
             (borrower, auto_rollover),
@@ -588,6 +623,99 @@ impl EscrowContract {
 
         Ok(amount_withdrawn)
         }) // non_reentrant
+    }
+
+    pub fn set_beneficiary(env: Env, borrower: Address, goal_id: Symbol, beneficiary: Option<Address>) -> Result<(), EscrowError> {
+        borrower.require_auth();
+        let key = DataKey::Beneficiary(borrower.clone(), goal_id.clone());
+        match &beneficiary {
+            Some(address) => {
+                env.storage().persistent().set(&key, address);
+                Self::extend_persistent_ttl(&env, &key);
+            }
+            None => env.storage().persistent().remove(&key),
+        }
+        Self::record_owner_activity(&env, &borrower, &goal_id);
+        env.events().publish((symbol_short!("ben_set"), goal_id), (borrower, beneficiary));
+        Ok(())
+    }
+
+    pub fn get_beneficiary(env: Env, borrower: Address, goal_id: Symbol) -> Option<Address> {
+        env.storage().persistent().get(&DataKey::Beneficiary(borrower, goal_id))
+    }
+
+    pub fn set_beneficiary_inactivity(env: Env, period_ledgers: u32) -> Result<(), EscrowError> {
+        let config = Self::get_config(&env)?;
+        config.admin.require_auth();
+        if period_ledgers == 0 || period_ledgers > config.max_duration_ledgers {
+            return Err(EscrowError::InvalidInactivityPeriod);
+        }
+        env.storage().instance().set(&DataKey::BeneficiaryInactivityPeriod, &period_ledgers);
+        Self::extend_instance_ttl(&env);
+        Ok(())
+    }
+
+    pub fn configure_beneficiary_attestors(env: Env, signers: soroban_sdk::Vec<Address>, threshold: u32) -> Result<(), EscrowError> {
+        let config = Self::get_config(&env)?;
+        config.admin.require_auth();
+        Self::validate_attestor_config(&signers, threshold)?;
+        env.storage().instance().set(&DataKey::BeneficiaryAttestors, &BeneficiaryAttestorConfig { signers, threshold });
+        Self::extend_instance_ttl(&env);
+        Ok(())
+    }
+
+    pub fn claim_as_beneficiary(
+        env: Env, borrower: Address, goal_id: Symbol, beneficiary: Address, attestations: soroban_sdk::Vec<Address>,
+    ) -> Result<i128, EscrowError> {
+        beneficiary.require_auth();
+        Self::check_not_paused(&env)?;
+        Self::non_reentrant(&env, || {
+            let configured: Address = env.storage().persistent().get(&DataKey::Beneficiary(borrower.clone(), goal_id.clone()))
+                .ok_or(EscrowError::BeneficiaryNotConfigured)?;
+            if configured != beneficiary { return Err(EscrowError::UnauthorizedBeneficiary); }
+            if env.storage().persistent().has(&DataKey::BeneficiaryClaimed(borrower.clone(), goal_id.clone())) {
+                return Err(EscrowError::BeneficiaryAlreadyClaimed);
+            }
+            let mut record = Self::get_borrower(&env, &borrower, &goal_id);
+            if record.deposited <= 0 || record.released || record.withdrawn || record.seized { return Err(EscrowError::NoClaimableFunds); }
+            let inactivity: u32 = env.storage().instance().get(&DataKey::BeneficiaryInactivityPeriod)
+                .ok_or(EscrowError::InvalidInactivityPeriod)?;
+            if env.ledger().sequence().saturating_sub(Self::last_owner_activity(&env, &borrower, &goal_id, &record)) < inactivity {
+                return Err(EscrowError::BeneficiaryInactivityNotElapsed);
+            }
+            let attestor_config: BeneficiaryAttestorConfig = env.storage().instance().get(&DataKey::BeneficiaryAttestors)
+                .ok_or(EscrowError::InvalidAttestation)?;
+            if attestations.len() < attestor_config.threshold { return Err(EscrowError::InsufficientAttestationQuorum); }
+            for i in 0..attestations.len() {
+                let attestor = attestations.get_unchecked(i);
+                attestor.require_auth();
+                let mut recognized = false;
+                for allowed in attestor_config.signers.iter() { if attestor == allowed { recognized = true; } }
+                if !recognized { return Err(EscrowError::InvalidAttestation); }
+                for j in (i + 1)..attestations.len() { if attestor == attestations.get_unchecked(j) { return Err(EscrowError::InvalidAttestation); } }
+            }
+            let config = Self::get_config(&env)?;
+            let mut claimable = record.deposited;
+            if let Some(vault) = &config.yield_vault {
+                if record.yield_shares > 0 {
+                    let args = soroban_sdk::vec![&env, env.current_contract_address().into_val(&env), record.yield_shares.into_val(&env)];
+                    claimable = env.invoke_contract(vault, &Symbol::new(&env, "withdraw"), args);
+                    env.storage().instance().set(&DataKey::TotalYieldShares, &(Self::read_total_yield_shares(&env) - record.yield_shares));
+                    record.yield_shares = 0;
+                }
+            }
+            get_token_client(&env, &config.token).transfer(&env.current_contract_address(), &beneficiary, &claimable);
+            env.storage().instance().set(&DataKey::TotalPooled, &(Self::read_total_pooled(&env) - record.deposited));
+            record.deposited = 0;
+            record.withdrawn = true;
+            Self::set_borrower(&env, &borrower, &goal_id, &record);
+            let claimed_key = DataKey::BeneficiaryClaimed(borrower.clone(), goal_id.clone());
+            env.storage().persistent().set(&claimed_key, &true);
+            Self::extend_persistent_ttl(&env, &claimed_key);
+            Self::extend_instance_ttl(&env);
+            env.events().publish((symbol_short!("ben_claim"), goal_id), (borrower, beneficiary, claimable));
+            Ok(claimable)
+        })
     }
 
     /// Propose new early withdrawal penalty tiers (timelocked).

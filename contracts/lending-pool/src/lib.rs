@@ -1170,7 +1170,7 @@ impl LendingPoolContract {
     ) -> Result<(), PoolError> {
         Self::check_not_paused(&env)?;
 
-        let mut loan = Self::read_loan(&env, &loan_id)?;
+        let loan = Self::read_loan(&env, &loan_id)?;
         loan.borrower.require_auth();
 
         if loan.status != LoanStatus::Approved {
@@ -3147,7 +3147,7 @@ impl LendingPoolContract {
 
         // Transfer loan obligations to new borrower
         loan.borrower = new_borrower;
-        Self::write_loan(&env, &loan_id, &loan);
+        Self::set_loan(&env, &loan_id, &loan);
 
         // Remove pending assumption request
         env.storage()

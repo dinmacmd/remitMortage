@@ -1,4 +1,12 @@
-use soroban_sdk::{contracttype, Address, BytesN, Symbol};
+use soroban_sdk::{contracttype, Address, BytesN, Symbol, Vec};
+
+/// Admin-controlled signers that attest to an owner's death or incapacity.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct BeneficiaryAttestorConfig {
+    pub signers: Vec<Address>,
+    pub threshold: u32,
+}
 
 /// Configuration set during contract initialization.
 #[contracttype]
@@ -116,4 +124,14 @@ pub enum DataKey {
     LendingPool,
     /// Reentrancy guard flag.
     ReentrancyGuard,
+    /// Optional designated beneficiary for an owner and savings goal.
+    Beneficiary(Address, Symbol),
+    /// The most recent authenticated action by an owner for a savings goal.
+    LastOwnerActivity(Address, Symbol),
+    /// Marks a beneficiary recovery that has already completed.
+    BeneficiaryClaimed(Address, Symbol),
+    /// Required inactivity duration, expressed in ledger sequence numbers.
+    BeneficiaryInactivityPeriod,
+    /// Admin-configured death/incapacity attestors and quorum.
+    BeneficiaryAttestors,
 }
